@@ -1,0 +1,93 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { useWeb3 } from "./web3-provider"
+import { useFirebase } from "./firebase-provider"
+import { ProfileSetupForm } from "./profile-setup-form"
+import { Wallet, Loader2 } from "lucide-react"
+import type { UserProfile } from "@/lib/types"
+import { usePathname } from "next/navigation"
+
+export function WalletConnect() {
+  const { account, connectWallet, disconnectWallet, isConnecting, isConnected } = useWeb3()
+  const { getUserProfile } = useFirebase()
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [showProfileSetup, setShowProfileSetup] = useState(false)
+  const [isCheckingProfile, setIsCheckingProfile] = useState(false)
+  const pathname = usePathname()
+
+  // Check if we're on the landing page
+  const isLandingPage = pathname === "/landing"
+
+  useEffect(() => {
+    if (account && isConnected) {
+      checkUserProfile(account)
+    } else {
+      setUserProfile(null)
+    }
+  }, [account, isConnected])
+
+  const checkUserProfile = async (address: string) => {
+    setIsCheckingProfile(true)
+    try {
+      const profile = await getUserProfile(address)
+      setUserProfile(profile)
+
+      if (!profile) {
+        setShowProfileSetup(true)
+      }
+    } catch (error) {
+      console.error("Error checking user profile:", error)
+    } finally {
+      setIsCheckingProfile(false)
+    }
+  }
+
+  const handleConnect = async () => {
+    await connectWallet()
+  }
+
+  const shortenAddress = (address: string) => {
+    return `${address.slice(0, 6)}...${address.slice(-4)}`
+  }
+
+  return (
+    <>
+      <div>
+        {isConnected && account ? (
+          <div className="flex items-center gap-2">
+            <div className="rounded-full bg-primary/20 px-3 py-1 text-sm text-primary">
+              {userProfile?.username || shortenAddress(account)}
+            </div>
+            <Button variant="outline" size="sm" onClick={disconnectWallet}>
+              Disconnect
+            </Button>
+          </div>
+        ) : (
+          <Button
+            onClick={handleConnect}
+            disabled={isConnecting || isCheckingProfile}
+            className="gap-2"
+            size={isLandingPage ? "lg" : "default"}
+            variant={isLandingPage ? "default" : "default"}
+          >
+            {isConnecting || isCheckingProfile ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {isConnecting ? "Connecting..." : "Checking..."}
+              </>
+            ) : (
+              <>
+                <Wallet className="h-4 w-4" />
+                Connect Wallet
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+
+      <ProfileSetupForm isOpen={showProfileSetup} onClose={() => setShowProfileSetup(false)} />
+    </>
+  )
+}
