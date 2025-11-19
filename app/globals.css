@@ -35,8 +35,11 @@
     --priority-low-foreground: 120 84% 40%;
 
     --kanban-todo: 210 40% 96%;
+    --kanban-todo-foreground: 210 40% 40%;
     --kanban-in-progress: 250 40% 96%;
+    --kanban-in-progress-foreground: 250 40% 50%;
     --kanban-done: 140 40% 96%;
+    --kanban-done-foreground: 140 40% 40%;
   }
 
   .dark {
@@ -71,8 +74,11 @@
     --priority-low-foreground: 0 0% 98%;
 
     --kanban-todo: 240 10% 8%;
+    --kanban-todo-foreground: 210 40% 70%;
     --kanban-in-progress: 240 10% 8%;
+    --kanban-in-progress-foreground: 250 40% 70%;
     --kanban-done: 240 10% 8%;
+    --kanban-done-foreground: 140 40% 70%;
   }
 }
 
@@ -95,6 +101,58 @@
     @apply p-4;
     @apply shadow-md;
   }
+
+  /* Add smooth scrolling and custom scrollbar - invisible by default, visible on hover/scroll */
+.kanban-column > div {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s ease;
+}
+
+/* Show scrollbar on column hover */
+.kanban-column:hover > div {
+  scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+}
+
+/* Webkit scrollbar styles */
+.kanban-column > div::-webkit-scrollbar {
+  width: 6px;
+}
+
+.kanban-column > div::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kanban-column > div::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+  transition: background-color 0.3s ease;
+}
+
+/* Show scrollbar thumb on column hover */
+.kanban-column:hover > div::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.3);
+}
+
+/* Show scrollbar thumb on active scroll (when user is scrolling) */
+.kanban-column > div:active::-webkit-scrollbar-thumb,
+.kanban-column > div:focus::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+}
+
+/* Dark mode scrollbar */
+.dark .kanban-column:hover > div {
+  scrollbar-color: rgba(156, 163, 175, 0.4) transparent;
+}
+
+.dark .kanban-column:hover > div::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.4);
+}
+
+.dark .kanban-column > div:active::-webkit-scrollbar-thumb,
+.dark .kanban-column > div:focus::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.6);
+}
 
   .kanban-column-todo {
     @apply bg-[hsl(var(--kanban-todo))];

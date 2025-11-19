@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sidebar } from "@/components/sidebar";
+import { useRouter } from "next/navigation";
 import { WalletConnect } from "@/components/wallet-connect";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useWeb3 } from "@/components/web3-provider";
 import { useFirebase } from "@/components/firebase-provider";
-import { WalletConnectionCard } from "@/components/wallet-connection-card";
 import type { Project } from "@/lib/types";
 import { PlusCircle, Calendar, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +38,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const { isConnected, account } = useWeb3();
   const { addProject, getProjects } = useFirebase();
   const { toast } = useToast();
@@ -148,23 +148,16 @@ export default function ProjectsPage() {
     return null;
   }
 
-  // If wallet is not connected, show the wallet connection card
-  if (!isConnected || !account) {
-    return <WalletConnectionCard />;
-  }
-
   return (
-    <div className="flex h-screen dark-container">
-      <Sidebar />
-      <div className="flex-1 overflow-auto">
-        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-gray-200 bg-white/80 backdrop-blur-sm px-6 dark-header">
-          <h1 className="text-xl font-bold">Projects</h1>
-          <div className="flex items-center gap-4">
-            <ThemeToggle />
-            <WalletConnect />
-          </div>
-        </header>
-        <main className="animate-in fade-in duration-500 p-6">
+    <>
+      <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-gray-200 bg-white/80 backdrop-blur-sm px-6 dark-header">
+        <h1 className="text-xl font-bold">Projects</h1>
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+          <WalletConnect />
+        </div>
+      </header>
+      <main className="animate-in fade-in duration-500 p-6">
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-2xl font-bold">My Projects</h2>
             <Dialog
@@ -230,9 +223,10 @@ export default function ProjectsPage() {
             {projects.map((project) => (
               <Card
                 key={project.id}
-                className={`overflow-hidden transition-all hover:shadow-lg dark-card ${getProjectCardClass(
+                className={`overflow-hidden transition-all hover:shadow-lg cursor-pointer dark-card ${getProjectCardClass(
                   project.status
                 )}`}
+                onClick={() => router.push(`/projects/${project.id}`)}
               >
                 <CardHeader className="pb-2">
                   <div className="flex justify-between items-start">
@@ -308,7 +302,6 @@ export default function ProjectsPage() {
             ))}
           </div>
         </main>
-      </div>
-    </div>
+    </>
   );
 }

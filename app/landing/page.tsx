@@ -1,14 +1,12 @@
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { ThemeToggle } from "@/components/theme-toggle"
-import { WalletConnect } from "@/components/wallet-connect"
-import { LandingFeatures } from "@/components/landing-features"
-import { LandingHero } from "@/components/landing-hero"
-import { LandingTestimonials } from "@/components/landing-testimonials"
-import { LandingPricing } from "@/components/landing-pricing"
-import { LandingFooter } from "@/components/landing-footer"
-import { LandingAI } from "@/components/landing-ai"
-import { LandingNav } from "@/components/landing-nav"
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { WalletConnect } from "@/components/wallet-connect";
+import { LandingFeatures } from "@/components/landing-features";
+import { LandingHero } from "@/components/landing-hero";
+import { LandingFooter } from "@/components/landing-footer";
+import { LandingAI } from "@/components/landing-ai";
+import { LandingNav } from "@/components/landing-nav";
 
 export default function LandingPage() {
   return (
@@ -52,11 +50,9 @@ export default function LandingPage() {
         <LandingHero />
         <LandingFeatures />
         <LandingAI />
-        <LandingTestimonials />
-        <LandingPricing />
       </main>
 
       <LandingFooter />
     </div>
-  )
+  );
 }

@@ -36,6 +36,13 @@ import {
   HelpCircle,
   Square,
   Check,
+  FileText,
+  DollarSign,
+  Award,
+  Lock,
+  X,
+  ChevronUp,
+  Tag,
 } from "lucide-react";
 import {
   Dialog,
@@ -70,10 +77,11 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import type { Task, UserProfile } from "@/lib/types";
+import type { Task, TaskProposal, UserProfile } from "@/lib/types";
 import { format } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PaymentPopup } from "./payment-popup";
+import { Switch } from "@/components/ui/switch";
 
 type Column = {
   id: string;
@@ -83,15 +91,17 @@ type Column = {
   count: number;
 };
 
-export function KanbanBoard() {
+export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const {
     addTask,
     getTasks,
+    getAllTasks,
     updateTask,
     deleteTask,
     isInitialized,
     getUserProfiles,
     getUserProfile,
+    getUserProfileById,
   } = useFirebase();
   const { account } = useWeb3();
   const { toast } = useToast();
@@ -132,6 +142,8 @@ export function KanbanBoard() {
     description: "",
     status: "todo",
     priority: "medium",
+  isOpenBounty: false,
+  escrowEnabled: false,
   });
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -145,9 +157,12 @@ export function KanbanBoard() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<UserProfile[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isManagingProposal, setIsManagingProposal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterPriority, setFilterPriority] = useState("all");
   const [assigneeSearchQuery, setAssigneeSearchQuery] = useState("");
+  const [reviewerSearchQuery, setReviewerSearchQuery] = useState("");
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [createdTasks, setCreatedTasks] = useState<Task[]>([]);
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
@@ -157,6 +172,10 @@ export function KanbanBoard() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isPaymentPopupOpen, setIsPaymentPopupOpen] = useState(false);
   const [taskToPay, setTaskToPay] = useState<Task | null>(null);
+  const [isProposalDialogOpen, setIsProposalDialogOpen] = useState(false);
+  const [proposalTargetTask, setProposalTargetTask] = useState<Task | null>(null);
+  const [proposalContent, setProposalContent] = useState("");
+  const [isSubmittingProposal, setIsSubmittingProposal] = useState(false);
   // Multiple Selection and batch processing
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -185,13 +204,46 @@ export function KanbanBoard() {
   const taskVersionsRef = useRef<Map<string, string>>(new Map());
 
   const firebase = useFirebase();
+  const isProjectView = Boolean(projectId);
+  const generateId = () =>
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  const formatAddress = (address?: string | null) => {
+    if (!address) return "Unknown";
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+  const syncTaskAcrossState = (updatedTask: Task) => {
+    const updater = (task: Task) =>
+      task.id === updatedTask.id ? updatedTask : task;
+    setAllTasks((prev) => prev.map(updater));
+    setCreatedTasks((prev) => prev.map(updater));
+    setAssignedTasks((prev) => prev.map(updater));
+    setColumns((prev) =>
+      prev.map((column) => ({
+        ...column,
+        tasks: column.tasks.map(updater),
+      }))
+    );
+  };
 
   useEffect(() => {
     if (account && isInitialized) {
       fetchAllTasks();
       fetchUsers();
+      // fetch and cache current user's profile id for UI comparisons
+      (async () => {
+        try {
+          const p = await getUserProfile(account);
+          setCurrentUserId(p ? p.id : null);
+        } catch (e) {
+          console.warn("Could not load current user profile id", e);
+          setCurrentUserId(null);
+        }
+      })();
     }
-  }, [account, isInitialized]);
+  }, [account, isInitialized, projectId]);
 
   useEffect(() => {
     if (selectedTask) {
@@ -202,6 +254,9 @@ export function KanbanBoard() {
         reward: selectedTask.reward,
         rewardAmount: selectedTask.rewardAmount,
         assigneeId: selectedTask.assigneeId,
+        reviewerId: selectedTask.reviewerId,
+        isOpenBounty: selectedTask.isOpenBounty,
+        escrowEnabled: selectedTask.escrowEnabled,
       });
     }
   }, [selectedTask, isEditMode]);
@@ -408,51 +463,70 @@ export function KanbanBoard() {
 
     setIsLoading(true);
     try {
-      // Fetch tasks created by the user
-      const userCreatedTasks = await getTasks(account);
-      setCreatedTasks(userCreatedTasks);
+      let allFetchedTasks: Task[] = [];
 
-      // Fetch tasks assigned to the user from Firestore
-      const db = firebase.db;
-      if (!db) {
-        console.error("Firestore is not initialized");
-        return;
+      if (projectId) {
+        // For project board: fetch all tasks and filter by projectId
+        const allTasks = await getAllTasks();
+        allFetchedTasks = allTasks.filter(
+          (task: Task) => (task as any).projectId === projectId
+        );
+      } else {
+        // For personal board: fetch tasks created by user
+        const userCreatedTasks = await getTasks(account);
+        setCreatedTasks(userCreatedTasks);
+
+        // Fetch tasks assigned to the user from Firestore
+        const db = firebase.db;
+        if (!db) {
+          console.error("Firestore is not initialized");
+          return;
+        }
+
+        const { collection, query, where, getDocs } = await import(
+          "firebase/firestore"
+        );
+        // Resolve assignee lookup id (prefer user profile id, fallback to wallet address)
+        let assigneeLookupId = account;
+        try {
+          const _profile = await getUserProfile(account);
+          if (_profile && _profile.id) assigneeLookupId = _profile.id;
+        } catch (e) {
+          console.warn("Could not resolve user profile for assignee lookup", e);
+        }
+
+        const q = query(
+          collection(db, "tasks"),
+          where("assigneeId", "==", assigneeLookupId)
+        );
+        const querySnapshot = await getDocs(q);
+        const assignedTasksData = querySnapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() } as Task)
+        );
+        setAssignedTasks(assignedTasksData);
+
+        // Combine both sets of tasks, removing duplicates
+        const combinedTasks = [...userCreatedTasks];
+
+        assignedTasksData.forEach((assignedTask) => {
+          if (!combinedTasks.some((task) => task.id === assignedTask.id)) {
+            combinedTasks.push(assignedTask);
+          }
+        });
+
+        allFetchedTasks = combinedTasks;
       }
 
-      const { collection, query, where, getDocs } = await import(
-        "firebase/firestore"
-      );
-      const q = query(
-        collection(db, "tasks"),
-        where("assigneeId", "==", account)
-      );
-      const querySnapshot = await getDocs(q);
-      const assignedTasksData = querySnapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as Task)
-      );
-      setAssignedTasks(assignedTasksData);
-
-      // Combine both sets of tasks, removing duplicates
-      const combinedTasks = [...userCreatedTasks];
-
-      assignedTasksData.forEach((assignedTask) => {
-        if (!combinedTasks.some((task) => task.id === assignedTask.id)) {
-          combinedTasks.push(assignedTask);
-        }
-      });
-
-      // After fetching tasks, ensure assignee information is populated
+      // After fetching tasks, ensure assignee/reviewer information is populated
       const tasksWithAssigneeInfo = await Promise.all(
-        combinedTasks.map(async (task) => {
-          // If task has assigneeId but no assignee info, fetch the user profile
+        allFetchedTasks.map(async (task) => {
+          let enrichedTask: Task = task;
           if (task.assigneeId) {
             try {
-              const assigneeProfile = await getUserProfile(
-                task.assigneeId.toLowerCase()
-              );
+              const assigneeProfile = await getUserProfileById(task.assigneeId);
               if (assigneeProfile) {
-                return {
-                  ...task,
+                enrichedTask = {
+                  ...enrichedTask,
                   assignee: {
                     id: assigneeProfile.id,
                     username: assigneeProfile.username,
@@ -464,7 +538,26 @@ export function KanbanBoard() {
               console.error("Error fetching assignee profile:", error);
             }
           }
-          return task;
+
+          if (task.reviewerId) {
+            try {
+              const reviewerProfile = await getUserProfileById(task.reviewerId);
+              if (reviewerProfile) {
+                enrichedTask = {
+                  ...enrichedTask,
+                  reviewer: {
+                    id: reviewerProfile.id,
+                    username: reviewerProfile.username,
+                    profilePicture: reviewerProfile.profilePicture,
+                  },
+                };
+              }
+            } catch (error) {
+              console.error("Error fetching reviewer profile:", error);
+            }
+          }
+
+          return enrichedTask;
         })
       );
 
@@ -486,17 +579,23 @@ export function KanbanBoard() {
   const updateColumnsBasedOnView = () => {
     let tasksToShow: Task[] = [];
 
-    switch (activeView) {
-      case "created":
-        tasksToShow = createdTasks;
-        break;
-      case "assigned":
-        tasksToShow = assignedTasks;
-        break;
-      case "all":
-      default:
-        tasksToShow = allTasks;
-        break;
+    // For project board, always show all tasks (no view switching)
+    if (projectId) {
+      tasksToShow = allTasks;
+    } else {
+      // For personal board, allow view switching
+      switch (activeView) {
+        case "created":
+          tasksToShow = createdTasks;
+          break;
+        case "assigned":
+          tasksToShow = assignedTasks;
+          break;
+        case "all":
+        default:
+          tasksToShow = allTasks;
+          break;
+      }
     }
 
     updateColumnsWithTasks(tasksToShow);
@@ -559,13 +658,23 @@ export function KanbanBoard() {
     setIsCreatingTask(true);
 
     try {
+      const timestamp = new Date().toISOString();
       // Convert "no_reward" to undefined for the reward field
-      const taskToCreate = {
+      const normalizedTask: Omit<Task, "id" | "userId" | "createdAt"> = {
         ...newTask,
         reward: newTask.reward === "no_reward" ? undefined : newTask.reward,
+        isOpenBounty: Boolean(newTask.isOpenBounty),
+        escrowEnabled: Boolean(newTask.escrowEnabled),
+        escrowStatus: newTask.escrowEnabled ? "locked" : undefined,
+        proposals: newTask.isOpenBounty ? ([] as TaskProposal[]) : undefined,
+      };
+
+      const taskToCreate = {
+        ...normalizedTask,
         userId: account,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        ...(projectId && { projectId }),
       };
 
       const taskId = await addTask(taskToCreate);
@@ -585,13 +694,28 @@ export function KanbanBoard() {
         }
       }
 
-      const newTaskWithId = {
+      let reviewer;
+      if (newTask.reviewerId) {
+        const reviewerProfile = availableUsers.find(
+          (user) => user.id === newTask.reviewerId
+        );
+        if (reviewerProfile) {
+          reviewer = {
+            id: reviewerProfile.id,
+            username: reviewerProfile.username,
+            profilePicture: reviewerProfile.profilePicture,
+          };
+        }
+      }
+
+      const newTaskWithId: Task = {
         id: taskId,
-        ...newTask,
+        ...normalizedTask,
         userId: account,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
         assignee,
+        reviewer,
       };
 
       // Update our task lists
@@ -599,8 +723,21 @@ export function KanbanBoard() {
       setAllTasks((prev) => [...prev, newTaskWithId]);
 
       // If the task is assigned to the current user, add it to assignedTasks too
-      if (newTask.assigneeId === account) {
-        setAssignedTasks((prev) => [...prev, newTaskWithId]);
+      try {
+        const currentProfile = await getUserProfile(account);
+        const currentUserId = currentProfile?.id;
+        if (
+          newTask.assigneeId &&
+          currentUserId &&
+          newTask.assigneeId === currentUserId
+        ) {
+          setAssignedTasks((prev) => [...prev, newTaskWithId]);
+        }
+      } catch (e) {
+        // fallback: if profile lookup fails and assigneeId equals wallet address
+        if (newTask.assigneeId === account) {
+          setAssignedTasks((prev) => [...prev, newTaskWithId]);
+        }
       }
 
       // Update columns based on current view
@@ -611,7 +748,11 @@ export function KanbanBoard() {
         description: "",
         status: "todo",
         priority: "medium",
+        isOpenBounty: false,
+        escrowEnabled: false,
       });
+      setAssigneeSearchQuery("");
+      setReviewerSearchQuery("");
 
       setIsDialogOpen(false);
 
@@ -644,12 +785,25 @@ export function KanbanBoard() {
 
     try {
       // Convert "no_reward" to undefined for the reward field
+      const timestamp = new Date().toISOString();
       const updatedTaskData = {
         ...editedTask,
         reward:
           editedTask.reward === "no_reward" ? undefined : editedTask.reward,
         assigneeId: editedTask.assigneeId,
-        updatedAt: new Date().toISOString(),
+        reviewerId: editedTask.reviewerId,
+        isOpenBounty:
+          typeof editedTask.isOpenBounty === "boolean"
+            ? editedTask.isOpenBounty
+            : selectedTask.isOpenBounty,
+        escrowEnabled:
+          typeof editedTask.escrowEnabled === "boolean"
+            ? editedTask.escrowEnabled
+            : selectedTask.escrowEnabled,
+        escrowStatus: editedTask.escrowEnabled
+          ? selectedTask.escrowStatus || "locked"
+          : undefined,
+        updatedAt: timestamp,
       };
 
       // If assignee changed, fetch the assignee details
@@ -670,23 +824,41 @@ export function KanbanBoard() {
         }
       }
 
-      const updatedTask = {
+      let reviewer = selectedTask.reviewer;
+      if (
+        editedTask.reviewerId &&
+        editedTask.reviewerId !== selectedTask.reviewerId
+      ) {
+        const reviewerProfile = availableUsers.find(
+          (user) => user.id === editedTask.reviewerId
+        );
+        if (reviewerProfile) {
+          reviewer = {
+            id: reviewerProfile.id,
+            username: reviewerProfile.username,
+            profilePicture: reviewerProfile.profilePicture,
+          };
+        }
+      } else if (!editedTask.reviewerId) {
+        reviewer = undefined;
+      }
+
+      const updatedTask: Task = {
         ...selectedTask,
         ...editedTask,
+        reward: updatedTaskData.reward,
         assignee,
-        updatedAt: new Date().toISOString(),
+        reviewer,
+        isOpenBounty: updatedTaskData.isOpenBounty,
+        escrowEnabled: updatedTaskData.escrowEnabled,
+        escrowStatus: updatedTaskData.escrowStatus,
+        updatedAt: timestamp,
       };
 
       await updateTask(selectedTask.id, updatedTaskData);
 
       // Update our task lists
-      const updateTaskInList = (list: Task[]) =>
-        list.map((task) => (task.id === updatedTask.id ? updatedTask : task));
-
-      setAllTasks(updateTaskInList(allTasks));
-      setCreatedTasks(updateTaskInList(createdTasks));
-      setAssignedTasks(updateTaskInList(assignedTasks));
-
+      syncTaskAcrossState(updatedTask);
       // Update columns based on current view
       updateColumnsBasedOnView();
 
@@ -803,6 +975,214 @@ export function KanbanBoard() {
     }
   };
 
+  const getTaskById = (taskId: string): Task | null => {
+    if (selectedTask && selectedTask.id === taskId) {
+      return selectedTask;
+    }
+    return (
+      allTasks.find((task) => task.id === taskId) ||
+      createdTasks.find((task) => task.id === taskId) ||
+      assignedTasks.find((task) => task.id === taskId) ||
+      null
+    );
+  };
+
+  const handleProposalDialogChange = (open: boolean) => {
+    if (!open) {
+      setProposalTargetTask(null);
+      setProposalContent("");
+    }
+    setIsProposalDialogOpen(open);
+  };
+
+  const handleSubmitProposal = async () => {
+    if (!proposalTargetTask || !proposalContent.trim()) {
+      toast({
+        title: "Proposal required",
+        description: "Please add details about your proposal.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!account) {
+      toast({
+        title: "Wallet not connected",
+        description: "Connect your wallet to submit a proposal.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmittingProposal(true);
+    try {
+      const applicantProfile =
+        availableUsers.find(
+          (user) =>
+            user.id === currentUserId ||
+            user.address.toLowerCase() === account.toLowerCase()
+        ) || null;
+      const applicantId = applicantProfile?.id || currentUserId || account;
+      const proposal = {
+        id: generateId(),
+        userId: applicantId,
+        username: applicantProfile?.username || formatAddress(account),
+        profilePicture: applicantProfile?.profilePicture,
+        message: proposalContent.trim(),
+        status: "pending" as const,
+        submittedAt: new Date().toISOString(),
+      };
+
+      const updatedProposals: TaskProposal[] = [
+        ...(proposalTargetTask.proposals || []),
+        proposal,
+      ];
+
+      await updateTask(proposalTargetTask.id, {
+        proposals: updatedProposals,
+        isOpenBounty: true,
+      });
+
+      const updatedTask: Task = {
+        ...proposalTargetTask,
+        proposals: updatedProposals,
+        isOpenBounty: true,
+      };
+
+      syncTaskAcrossState(updatedTask);
+      if (selectedTask?.id === updatedTask.id) {
+        setSelectedTask(updatedTask);
+      }
+
+      toast({
+        title: "Proposal submitted",
+        description: "Your proposal has been sent to the task owner.",
+      });
+      handleProposalDialogChange(false);
+    } catch (error) {
+      console.error("Error submitting proposal:", error);
+      toast({
+        title: "Error",
+        description: "Failed to submit proposal.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmittingProposal(false);
+    }
+  };
+
+  const handleApproveProposal = async (taskId: string, proposalId: string) => {
+    const targetTask = getTaskById(taskId);
+    if (!targetTask || !targetTask.proposals) return;
+
+    setIsManagingProposal(true);
+    try {
+      const proposal = targetTask.proposals.find((p) => p.id === proposalId);
+      if (!proposal) {
+        setIsManagingProposal(false);
+        return;
+      }
+
+      const updatedProposals = targetTask.proposals.map((p) =>
+        p.id === proposalId
+          ? { ...p, status: "approved" as const }
+          : {
+              ...p,
+              status:
+                p.status === "pending"
+                  ? ("rejected" as const)
+                  : p.status,
+            }
+      ) as TaskProposal[];
+
+      const assigneeProfile =
+        availableUsers.find((user) => user.id === proposal.userId) || null;
+      const assigneeData = assigneeProfile
+        ? {
+            id: assigneeProfile.id,
+            username: assigneeProfile.username,
+            profilePicture: assigneeProfile.profilePicture,
+          }
+        : {
+            id: proposal.userId,
+            username: proposal.username,
+            profilePicture: proposal.profilePicture || "",
+          };
+
+      await updateTask(taskId, {
+        assigneeId: assigneeData.id,
+        proposals: updatedProposals,
+        isOpenBounty: false,
+      });
+
+      const updatedTask: Task = {
+        ...targetTask,
+        assigneeId: assigneeData.id,
+        assignee: assigneeData,
+        proposals: updatedProposals,
+        isOpenBounty: false,
+      };
+
+      syncTaskAcrossState(updatedTask);
+      if (selectedTask?.id === updatedTask.id) {
+        setSelectedTask(updatedTask);
+      }
+
+      toast({
+        title: "Proposal approved",
+        description: `${proposal.username} has been assigned to the task.`,
+      });
+    } catch (error) {
+      console.error("Error approving proposal:", error);
+      toast({
+        title: "Error",
+        description: "Failed to approve proposal.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsManagingProposal(false);
+    }
+  };
+
+  const handleRejectProposal = async (taskId: string, proposalId: string) => {
+    const targetTask = getTaskById(taskId);
+    if (!targetTask || !targetTask.proposals) return;
+
+    setIsManagingProposal(true);
+    try {
+      const updatedProposals = targetTask.proposals.map((p) =>
+        p.id === proposalId ? { ...p, status: "rejected" as const } : p
+      ) as TaskProposal[];
+
+      await updateTask(taskId, {
+        proposals: updatedProposals,
+      });
+
+      const updatedTask: Task = {
+        ...targetTask,
+        proposals: updatedProposals,
+      };
+
+      syncTaskAcrossState(updatedTask);
+      if (selectedTask?.id === updatedTask.id) {
+        setSelectedTask(updatedTask);
+      }
+
+      toast({
+        title: "Proposal rejected",
+        description: "The proposal has been rejected.",
+      });
+    } catch (error) {
+      console.error("Error rejecting proposal:", error);
+      toast({
+        title: "Error",
+        description: "Failed to reject proposal.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsManagingProposal(false);
+    }
+  };
+
   const handleApproveSubmission = async () => {
     if (!selectedTask || !selectedTask.submission) return;
 
@@ -813,6 +1193,11 @@ export function KanbanBoard() {
         ...selectedTask.submission,
         status: "approved" as const,
       };
+
+      const reviewerAction =
+        selectedTask.reviewerId &&
+        selectedTask.reviewerId === currentUserId &&
+        selectedTask.userId !== account;
 
       const updatedTask = {
         ...selectedTask,
@@ -826,22 +1211,13 @@ export function KanbanBoard() {
         status: "done",
         updatedAt: new Date().toISOString(),
       });
-
-      // Update our task lists
-      const updateTaskInList = (list: Task[]) =>
-        list.map((task) => (task.id === updatedTask.id ? updatedTask : task));
-
-      setAllTasks(updateTaskInList(allTasks));
-      setCreatedTasks(updateTaskInList(createdTasks));
-      setAssignedTasks(updateTaskInList(assignedTasks));
-
-      // Update columns based on current view
+      syncTaskAcrossState(updatedTask);
       updateColumnsBasedOnView();
-
       setSelectedTask(updatedTask);
 
       // If the task has a reward, show the payment dialog
       if (
+        !reviewerAction &&
         updatedTask.reward &&
         updatedTask.rewardAmount &&
         updatedTask.assigneeId
@@ -1618,195 +1994,268 @@ export function KanbanBoard() {
   };
 
   return (
-    <div className="p-4 min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 dark:bg-gray-900 dark:from-gray-900 dark:to-gray-800">
-      <div className="mb-6 flex items-center justify-between">
+    <div
+      className={`p-4 bg-gradient-to-br from-blue-50 to-purple-50 dark:bg-gray-900 dark:from-gray-900 dark:to-gray-800 rounded-2xl shadow-inner ${
+        isProjectView
+          ? "flex flex-col gap-4 h-[calc(100vh-6rem)] lg:h-[calc(100vh-5rem)] min-h-0 overflow-hidden"
+          : "flex flex-col gap-4"
+      }`}
+    >
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-2">
           {/* <Button variant="ghost" size="icon" className="rounded-full">
             <ChevronLeft className="h-5 w-5" />
           </Button> */}
-          <h1 className="text-2xl font-bold"> My Task Board</h1>
           {isSelectionMode && selectedTasks.size > 0 && (
             <Badge variant="secondary" className="ml-2">
               {selectedTasks.size} selected
             </Badge>
           )}
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
-                <HelpCircle className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80">
-              <div className="space-y-2">
-                <h4 className="font-medium">Keyboard Shortcuts</h4>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      Toggle Selection
-                    </span>
-                    <kbd className="px-2 py-1 bg-muted rounded">
-                      Ctrl+Shift+S
-                    </kbd>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      Process Payment
-                    </span>
-                    <kbd className="px-2 py-1 bg-muted rounded">
-                      Ctrl+Shift+P
-                    </kbd>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Undo</span>
-                    <kbd className="px-2 py-1 bg-muted rounded">Ctrl+Z</kbd>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      Cancel Selection
-                    </span>
-                    <kbd className="px-2 py-1 bg-muted rounded">Esc</kbd>
-                  </div>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gradient-button">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Task
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create New Task</DialogTitle>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="title">Title</Label>
-                <Input
-                  id="title"
-                  value={newTask.title}
-                  onChange={(e) =>
-                    setNewTask({ ...newTask, title: e.target.value })
-                  }
-                  placeholder="Task title"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  value={newTask.description}
-                  onChange={(e) =>
-                    setNewTask({ ...newTask, description: e.target.value })
-                  }
-                  placeholder="Task description"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gradient-button">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Task
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Create New Task</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select
-                    value={newTask.status}
-                    onValueChange={(value) =>
-                      setNewTask({ ...newTask, status: value })
+                  <Label htmlFor="title">Title</Label>
+                  <Input
+                    id="title"
+                    value={newTask.title}
+                    onChange={(e) =>
+                      setNewTask({ ...newTask, title: e.target.value })
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todo">To Do</SelectItem>
-                      <SelectItem value="inprogress">In Progress</SelectItem>
-                      <SelectItem value="review">Review</SelectItem>
-                      <SelectItem value="done">Done</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Task title"
+                  />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="priority">Priority</Label>
-                  <Select
-                    value={newTask.priority}
-                    onValueChange={(value) =>
-                      setNewTask({ ...newTask, priority: value })
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea
+                    id="description"
+                    value={newTask.description}
+                    onChange={(e) =>
+                      setNewTask({ ...newTask, description: e.target.value })
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    placeholder="Task description"
+                  />
                 </div>
-              </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="status">Status</Label>
+                    <Select
+                      value={newTask.status}
+                      onValueChange={(value) =>
+                        setNewTask({ ...newTask, status: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todo">To Do</SelectItem>
+                        <SelectItem value="inprogress">In Progress</SelectItem>
+                        <SelectItem value="review">Review</SelectItem>
+                        <SelectItem value="done">Done</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="priority">Priority</Label>
+                    <Select
+                      value={newTask.priority}
+                      onValueChange={(value) =>
+                        setNewTask({ ...newTask, priority: value })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="assignee">Assignee</Label>
+                  <div className="relative">
+                    <Input
+                      placeholder="Search by username or wallet address..."
+                      value={assigneeSearchQuery}
+                      onChange={(e) => setAssigneeSearchQuery(e.target.value)}
+                      className="w-full"
+                    />
+                    <div
+                      className={`absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md ${
+                        assigneeSearchQuery ? "block" : "hidden"
+                      }`}
+                    >
+                      <div className="max-h-60 overflow-auto p-1">
+                        <div
+                          className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                          onClick={() => {
+                            setNewTask({ ...newTask, assigneeId: undefined });
+                            setAssigneeSearchQuery("");
+                          }}
+                        >
+                          <User className="h-4 w-4" />
+                          <span>Unassigned</span>
+                        </div>
+                        {isLoadingUsers ? (
+                          <div className="flex items-center justify-center p-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          </div>
+                        ) : (
+                          getFilteredUsers(
+                            availableUsers,
+                            assigneeSearchQuery
+                          ).map((user) => (
+                            <div
+                              key={user.id}
+                              className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                              onClick={() => {
+                                setNewTask({ ...newTask, assigneeId: user.id });
+                                setAssigneeSearchQuery("");
+                              }}
+                            >
+                              <Avatar className="h-6 w-6">
+                                <AvatarImage
+                                  src={user.profilePicture || "/placeholder.svg"}
+                                  alt={user.username}
+                                />
+                                <AvatarFallback>
+                                  {user.username.substring(0, 2)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex flex-col">
+                                <span>{user.username}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {user.address.substring(0, 10)}...
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                        {assigneeSearchQuery &&
+                          getFilteredUsers(
+                            availableUsers,
+                            assigneeSearchQuery
+                          ).length === 0 && (
+                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                              No users found
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                  {newTask.assigneeId && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-sm">Selected:</span>
+                      {(() => {
+                        const user = availableUsers.find(
+                          (user) => user.id === newTask.assigneeId
+                        );
+                        return (
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-6 w-6">
+                              <AvatarImage
+                                src={user?.profilePicture || "/placeholder.svg"}
+                                alt={user?.username}
+                              />
+                              <AvatarFallback>
+                                {user?.username?.substring(0, 2) || "UN"}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm">
+                              {user?.username || "Unknown User"}
+                            </span>
+                          </div>
+                        );
+                      })()}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 rounded-full"
+                        onClick={() =>
+                          setNewTask({ ...newTask, assigneeId: undefined })
+                        }
+                      >
+                        <XCircle className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
               <div className="grid gap-2">
-                <Label htmlFor="assignee">Assignee</Label>
+                <Label htmlFor="reviewer">Reviewer</Label>
                 <div className="relative">
                   <Input
                     placeholder="Search by username or wallet address..."
-                    value={assigneeSearchQuery}
-                    onChange={(e) => setAssigneeSearchQuery(e.target.value)}
+                    value={reviewerSearchQuery}
+                    onChange={(e) => setReviewerSearchQuery(e.target.value)}
                     className="w-full"
                   />
                   <div
                     className={`absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md ${
-                      assigneeSearchQuery ? "block" : "hidden"
+                      reviewerSearchQuery ? "block" : "hidden"
                     }`}
                   >
                     <div className="max-h-60 overflow-auto p-1">
                       <div
                         className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
                         onClick={() => {
-                          setNewTask({ ...newTask, assigneeId: undefined });
-                          setAssigneeSearchQuery("");
+                          setNewTask({ ...newTask, reviewerId: undefined });
+                          setReviewerSearchQuery("");
                         }}
                       >
                         <User className="h-4 w-4" />
-                        <span>Unassigned</span>
+                        <span>No Reviewer</span>
                       </div>
                       {isLoadingUsers ? (
                         <div className="flex items-center justify-center p-2">
                           <Loader2 className="h-4 w-4 animate-spin" />
                         </div>
                       ) : (
-                        getFilteredUsers(
-                          availableUsers,
-                          assigneeSearchQuery
-                        ).map((user) => (
-                          <div
-                            key={user.id}
-                            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
-                            onClick={() => {
-                              setNewTask({ ...newTask, assigneeId: user.id });
-                              setAssigneeSearchQuery("");
-                            }}
-                          >
-                            <Avatar className="h-6 w-6">
-                              <AvatarImage
-                                src={user.profilePicture || "/placeholder.svg"}
-                                alt={user.username}
-                              />
-                              <AvatarFallback>
-                                {user.username.substring(0, 2)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex flex-col">
-                              <span>{user.username}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {user.address.substring(0, 10)}...
-                              </span>
+                        getFilteredUsers(availableUsers, reviewerSearchQuery).map(
+                          (user) => (
+                            <div
+                              key={user.id}
+                              className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                              onClick={() => {
+                                setNewTask({ ...newTask, reviewerId: user.id });
+                                setReviewerSearchQuery("");
+                              }}
+                            >
+                              <Avatar className="h-6 w-6">
+                                <AvatarImage
+                                  src={user.profilePicture || "/placeholder.svg"}
+                                  alt={user.username}
+                                />
+                                <AvatarFallback>
+                                  {user.username.substring(0, 2)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex flex-col">
+                                <span>{user.username}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {user.address.substring(0, 10)}...
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                        ))
+                          )
+                        )
                       )}
-                      {assigneeSearchQuery &&
-                        getFilteredUsers(availableUsers, assigneeSearchQuery)
+                      {reviewerSearchQuery &&
+                        getFilteredUsers(availableUsers, reviewerSearchQuery)
                           .length === 0 && (
                           <div className="px-2 py-1.5 text-sm text-muted-foreground">
                             No users found
@@ -1815,26 +2264,26 @@ export function KanbanBoard() {
                     </div>
                   </div>
                 </div>
-                {newTask.assigneeId && (
+                {newTask.reviewerId && (
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-sm">Selected:</span>
                     {(() => {
-                      const user = availableUsers.find(
-                        (user) => user.id === newTask.assigneeId
+                      const reviewer = availableUsers.find(
+                        (user) => user.id === newTask.reviewerId
                       );
                       return (
                         <div className="flex items-center gap-2">
                           <Avatar className="h-6 w-6">
                             <AvatarImage
-                              src={user?.profilePicture || "/placeholder.svg"}
-                              alt={user?.username}
+                              src={reviewer?.profilePicture || "/placeholder.svg"}
+                              alt={reviewer?.username}
                             />
                             <AvatarFallback>
-                              {user?.username?.substring(0, 2) || "UN"}
+                              {reviewer?.username?.substring(0, 2) || "RV"}
                             </AvatarFallback>
                           </Avatar>
                           <span className="text-sm">
-                            {user?.username || "Unknown User"}
+                            {reviewer?.username || "Unknown Reviewer"}
                           </span>
                         </div>
                       );
@@ -1844,7 +2293,7 @@ export function KanbanBoard() {
                       size="sm"
                       className="h-6 w-6 p-0 rounded-full"
                       onClick={() =>
-                        setNewTask({ ...newTask, assigneeId: undefined })
+                        setNewTask({ ...newTask, reviewerId: undefined })
                       }
                     >
                       <XCircle className="h-4 w-4" />
@@ -1852,97 +2301,63 @@ export function KanbanBoard() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="reward">Reward (Optional)</Label>
-                  <Select
-                    value={newTask.reward || "no_reward"}
-                    onValueChange={(value) =>
-                      setNewTask({
-                        ...newTask,
-                        reward: value === "no_reward" ? undefined : value,
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select token" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="no_reward">No Reward</SelectItem>
-                      <SelectItem value="USDC">USDC</SelectItem>
-                      <SelectItem value="ETH">ETH</SelectItem>
-                      <SelectItem value="BNB">BNB</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="rewardAmount">Amount (Optional)</Label>
-                  <Input
-                    id="rewardAmount"
-                    type="number"
-                    value={newTask.rewardAmount || ""}
-                    onChange={(e) =>
-                      setNewTask({
-                        ...newTask,
-                        rewardAmount: e.target.value
-                          ? Number.parseFloat(e.target.value)
-                          : undefined,
-                      })
-                    }
-                    placeholder="0.00"
-                    disabled={!newTask.reward}
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="reward">Reward (Optional)</Label>
+                    <Select
+                      value={newTask.reward || "no_reward"}
+                      onValueChange={(value) =>
+                        setNewTask({
+                          ...newTask,
+                          reward: value === "no_reward" ? undefined : value,
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select token" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="no_reward">No Reward</SelectItem>
+                        <SelectItem value="USDC">USDC</SelectItem>
+                          <SelectItem value="USDT">USDT</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="rewardAmount">Amount (Optional)</Label>
+                    <Input
+                      id="rewardAmount"
+                      type="number"
+                      value={newTask.rewardAmount || ""}
+                      onChange={(e) =>
+                        setNewTask({
+                          ...newTask,
+                          rewardAmount: e.target.value
+                            ? Number.parseFloat(e.target.value)
+                            : undefined,
+                        })
+                      }
+                      placeholder="0.00"
+                      disabled={!newTask.reward}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreateTask}
-                disabled={isLoading}
-                className="gradient-button"
-              >
-                {isLoading ? "Creating..." : "Create Task"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <div className="mb-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <Tabs
-            value={activeView}
-            onValueChange={setActiveView}
-            className="w-full md:w-auto"
-          >
-            <TabsList className="bg-white/80 dark:bg-[#1e1e1e] p-1 shadow-sm">
-              <TabsTrigger
-                value="all"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
-              >
-                <Circle className="h-4 w-4" />
-                All Tasks
-              </TabsTrigger>
-              <TabsTrigger
-                value="created"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
-              >
-                <FileEdit className="h-4 w-4 text-purple-500" />
-                Created by Me
-              </TabsTrigger>
-              <TabsTrigger
-                value="assigned"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
-              >
-                <UserCircle className="h-4 w-4 text-blue-500" />
-                Assigned to Me
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <div className="flex items-center gap-2">
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleCreateTask}
+                  disabled={isLoading}
+                  className="gradient-button"
+                >
+                  {isLoading ? "Creating..." : "Create Task"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <div className="flex flex-wrap items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1996,12 +2411,87 @@ export function KanbanBoard() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <HelpCircle className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80">
+                <div className="space-y-2">
+                  <h4 className="font-medium">Keyboard Shortcuts</h4>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Toggle Selection
+                      </span>
+                      <kbd className="px-2 py-1 bg-muted rounded">
+                        Ctrl+Shift+S
+                      </kbd>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Process Payment
+                      </span>
+                      <kbd className="px-2 py-1 bg-muted rounded">
+                        Ctrl+Shift+P
+                      </kbd>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Undo</span>
+                      <kbd className="px-2 py-1 bg-muted rounded">Ctrl+Z</kbd>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Cancel Selection
+                      </span>
+                      <kbd className="px-2 py-1 bg-muted rounded">Esc</kbd>
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {!projectId && (
+        <div>
+          <Tabs
+            value={activeView}
+            onValueChange={setActiveView}
+            className="w-full md:w-auto"
+          >
+            <TabsList className="bg-white/80 dark:bg-[#1e1e1e] p-1 shadow-sm">
+              <TabsTrigger
+                value="all"
+                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
+              >
+                <Circle className="h-4 w-4" />
+                All Tasks
+              </TabsTrigger>
+              <TabsTrigger
+                value="created"
+                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
+              >
+                <FileEdit className="h-4 w-4 text-purple-500" />
+                Created by Me
+              </TabsTrigger>
+              <TabsTrigger
+                value="assigned"
+                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
+              >
+                <UserCircle className="h-4 w-4 text-blue-500" />
+                Assigned to Me
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      )}
+
+      <div className={`flex-1 min-h-0 ${isProjectView ? "overflow-hidden" : ""}`}>
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 h-full">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}
@@ -2031,11 +2521,17 @@ export function KanbanBoard() {
         </div>
       ) : (
         <DragDropContext onDragEnd={onDragEnd}>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div
+            className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 ${
+              isProjectView ? "h-full min-h-0" : ""
+            }`}
+          >
             {columns.map((column) => (
               <div
                 key={column.id}
-                className="kanban-column kanban-column-todo bg-white/80 dark:bg-[#1e1e1e] rounded-lg p-4 shadow-md"
+                className={`kanban-column kanban-column-todo bg-white/80 dark:bg-[#1e1e1e] rounded-lg p-4 shadow-md flex flex-col ${
+                  isProjectView ? "h-full min-h-0" : ""
+                }`}
               >
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -2063,7 +2559,8 @@ export function KanbanBoard() {
                     <div
                       {...provided.droppableProps}
                       ref={provided.innerRef}
-                      className="min-h-[400px] space-y-3"
+                      className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-2 -mr-2"
+                      style={{ minHeight: 0 }}
                     >
                       {/* Render grouped tasks for Done column, regular tasks for others */}
                       {column.id === "done" ? (
@@ -2197,6 +2694,22 @@ export function KanbanBoard() {
                                                           {task.reward}
                                                         </div>
                                                       )}
+                                                    {task.isOpenBounty && (
+                                                      <Badge
+                                                        variant="outline"
+                                                        className="ml-1 text-xs bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/40"
+                                                      >
+                                                        Open
+                                                      </Badge>
+                                                    )}
+                                                    {task.escrowEnabled && (
+                                                      <Badge
+                                                        variant="outline"
+                                                        className="ml-1 text-xs bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/40"
+                                                      >
+                                                        Escrow
+                                                      </Badge>
+                                                    )}
                                                   </div>
 
                                                   <div className="mt-2 flex items-center justify-between">
@@ -2535,6 +3048,22 @@ export function KanbanBoard() {
                                           {task.rewardAmount} {task.reward}
                                         </div>
                                       )}
+                                      {task.isOpenBounty && (
+                                        <Badge
+                                          variant="outline"
+                                          className="ml-1 text-xs bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30"
+                                        >
+                                          Open
+                                        </Badge>
+                                      )}
+                                      {task.escrowEnabled && (
+                                        <Badge
+                                          variant="outline"
+                                          className="ml-1 text-xs bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30"
+                                        >
+                                          Escrow
+                                        </Badge>
+                                      )}
                                       {task.paid && (
                                         <Badge
                                           variant="outline"
@@ -2576,7 +3105,7 @@ export function KanbanBoard() {
                                             <AvatarFallback>?</AvatarFallback>
                                           </Avatar>
                                           <span className="text-xs text-muted-foreground">
-                                            {task.assigneeId === account
+                                            {task.assigneeId === currentUserId
                                               ? "You"
                                               : "Assigned"}
                                           </span>
@@ -2610,7 +3139,7 @@ export function KanbanBoard() {
                                             Owner
                                           </Badge>
                                         )}
-                                        {task.assigneeId === account &&
+                                        {task.assigneeId === currentUserId &&
                                           task.userId !== account && (
                                             <Badge
                                               variant="outline"
@@ -2646,6 +3175,7 @@ export function KanbanBoard() {
           </div>
         </DragDropContext>
       )}
+      </div>
 
       {/* Task Detail Dialog */}
       <Dialog open={isTaskDetailOpen} onOpenChange={setIsTaskDetailOpen}>
@@ -2720,6 +3250,24 @@ export function KanbanBoard() {
                           className="bg-green-100 dark:bg-green-600/20 text-green-600 dark:text-green-400 border-green-200 dark:border-green-600/50"
                         >
                           Paid
+                        </Badge>
+                      )}
+                      {selectedTask.isOpenBounty && (
+                        <Badge
+                          variant="outline"
+                          className="bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/40"
+                        >
+                          Open Bounty
+                        </Badge>
+                      )}
+                      {selectedTask.escrowEnabled && (
+                        <Badge
+                          variant="outline"
+                          className="bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/40"
+                        >
+                          {selectedTask.escrowStatus === "locked"
+                            ? "Escrow Locked"
+                            : "Escrow Enabled"}
                         </Badge>
                       )}
                     </div>
@@ -2902,6 +3450,133 @@ export function KanbanBoard() {
                         )}
                       </div>
                     </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-reviewer">Reviewer</Label>
+                    <div className="relative">
+                      <Input
+                        placeholder="Search by username or wallet address..."
+                        value={reviewerSearchQuery}
+                        onChange={(e) =>
+                          setReviewerSearchQuery(e.target.value)
+                        }
+                        className="w-full"
+                      />
+                      <div
+                        className={`absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md ${
+                          reviewerSearchQuery ? "block" : "hidden"
+                        }`}
+                      >
+                        <div className="max-h-60 overflow-auto p-1">
+                          <div
+                            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                            onClick={() => {
+                              setEditedTask({
+                                ...editedTask,
+                                reviewerId: undefined,
+                              });
+                              setReviewerSearchQuery("");
+                            }}
+                          >
+                            <User className="h-4 w-4" />
+                            <span>No Reviewer</span>
+                          </div>
+                          {isLoadingUsers ? (
+                            <div className="flex items-center justify-center p-2">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            </div>
+                          ) : (
+                            getFilteredUsers(
+                              availableUsers,
+                              reviewerSearchQuery
+                            ).map((user) => (
+                              <div
+                                key={user.id}
+                                className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer hover:bg-accent"
+                                onClick={() => {
+                                  setEditedTask({
+                                    ...editedTask,
+                                    reviewerId: user.id,
+                                  });
+                                  setReviewerSearchQuery("");
+                                }}
+                              >
+                                <Avatar className="h-6 w-6">
+                                  <AvatarImage
+                                    src={
+                                      user.profilePicture || "/placeholder.svg"
+                                    }
+                                    alt={user.username}
+                                  />
+                                  <AvatarFallback>
+                                    {user.username.substring(0, 2)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex flex-col">
+                                  <span>{user.username}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {user.address.substring(0, 10)}...
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                          {reviewerSearchQuery &&
+                            getFilteredUsers(
+                              availableUsers,
+                              reviewerSearchQuery
+                            ).length === 0 && (
+                              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                No users found
+                              </div>
+                            )}
+                        </div>
+                      </div>
+                    </div>
+                    {editedTask.reviewerId && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm">Selected:</span>
+                        {(() => {
+                          const reviewer = availableUsers.find(
+                            (user) => user.id === editedTask.reviewerId
+                          );
+                          return (
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-6 w-6">
+                                <AvatarImage
+                                  src={
+                                    reviewer?.profilePicture ||
+                                    "/placeholder.svg"
+                                  }
+                                  alt={reviewer?.username}
+                                />
+                                <AvatarFallback>
+                                  {reviewer?.username?.substring(0, 2) || "RV"}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-sm">
+                                {reviewer?.username || "Unknown Reviewer"}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 rounded-full"
+                          onClick={() =>
+                            setEditedTask({
+                              ...editedTask,
+                              reviewerId: undefined,
+                            })
+                          }
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-2">
                         <Label htmlFor="edit-reward">Reward</Label>
@@ -2920,8 +3595,7 @@ export function KanbanBoard() {
                           <SelectContent>
                             <SelectItem value="no_reward">No Reward</SelectItem>
                             <SelectItem value="USDC">USDC</SelectItem>
-                            <SelectItem value="ETH">ETH</SelectItem>
-                            <SelectItem value="BNB">BNB</SelectItem>
+                            <SelectItem value="USDT">USDT</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2944,6 +3618,44 @@ export function KanbanBoard() {
                         />
                       </div>
                     </div>
+                <div className="grid gap-4">
+                  <div className="flex items-start justify-between rounded-md border p-3">
+                    <div className="pr-4">
+                      <Label className="text-sm font-medium">Open Bounty</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Allow contributors to submit proposals.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={Boolean(editedTask.isOpenBounty)}
+                      onCheckedChange={(checked) =>
+                        setEditedTask({
+                          ...editedTask,
+                          isOpenBounty: checked,
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="flex items-start justify-between rounded-md border p-3">
+                    <div className="pr-4">
+                      <Label className="text-sm font-medium">
+                        Escrow Payment
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Lock the reward in escrow for this task.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={Boolean(editedTask.escrowEnabled)}
+                      onCheckedChange={(checked) =>
+                        setEditedTask({
+                          ...editedTask,
+                          escrowEnabled: checked,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
                   </div>
                 </div>
               ) : (
@@ -3001,6 +3713,33 @@ export function KanbanBoard() {
                   )}
 
                   <div className="mb-4">
+                    <h3 className="text-sm font-medium mb-1">Reviewer</h3>
+                    {selectedTask.reviewer ? (
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-6 w-6">
+                          <AvatarImage
+                            src={
+                              selectedTask.reviewer.profilePicture ||
+                              "/placeholder.svg"
+                            }
+                            alt={selectedTask.reviewer.username}
+                          />
+                          <AvatarFallback>
+                            {selectedTask.reviewer.username.substring(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm">
+                          {selectedTask.reviewer.username}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No reviewer assigned
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mb-4">
                     <h3 className="text-sm font-medium mb-1">Created</h3>
                     <div className="flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -3033,6 +3772,29 @@ export function KanbanBoard() {
                           </>
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {selectedTask.isOpenBounty && (
+                    <div className="mb-4 rounded-md border border-dashed border-amber-200 bg-amber-50/70 dark:border-amber-500/40 dark:bg-amber-500/10 p-3">
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                        Open bounty is active
+                      </p>
+                      <p className="text-xs text-amber-700 dark:text-amber-100/80 mt-1">
+                        Contributors can submit proposals. Approve one to assign
+                        the task automatically.
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedTask.escrowEnabled && (
+                    <div className="mb-4 rounded-md border border-dashed border-blue-200 bg-blue-50/70 dark:border-blue-500/40 dark:bg-blue-500/10 p-3">
+                      <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                        Escrow enabled
+                      </p>
+                      <p className="text-xs text-blue-700 dark:text-blue-100/80 mt-1">
+                        Payment is locked in escrow until the owner releases it.
+                      </p>
                     </div>
                   )}
 
@@ -3078,6 +3840,93 @@ export function KanbanBoard() {
                       </div>
                     </div>
                   )}
+
+                  {selectedTask.proposals && selectedTask.proposals.length > 0 && (
+                    <div className="mb-4">
+                      <h3 className="text-sm font-medium mb-2">Proposals</h3>
+                      <div className="space-y-3 max-h-72 overflow-auto pr-1">
+                        {selectedTask.proposals.map((proposal) => {
+                          const isApplicant =
+                            proposal.userId === currentUserId ||
+                            proposal.userId === account;
+                          return (
+                            <div
+                              key={proposal.id}
+                              className="rounded-lg border p-3 bg-white dark:bg-[#1e1e1e] border-gray-200 dark:border-[#333]"
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div>
+                                  <p className="text-sm font-medium">
+                                    {proposal.username}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {format(
+                                      new Date(proposal.submittedAt),
+                                      "PPp"
+                                    )}
+                                  </p>
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    proposal.status === "approved"
+                                      ? "bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300 border-green-200 dark:border-green-500/40"
+                                      : proposal.status === "rejected"
+                                      ? "bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-500/40"
+                                      : "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-500/40"
+                                  }
+                                >
+                                  {proposal.status.charAt(0).toUpperCase() +
+                                    proposal.status.slice(1)}
+                                </Badge>
+                              </div>
+                              <p className="text-sm whitespace-pre-line">
+                                {proposal.message}
+                              </p>
+                              {isApplicant && proposal.status === "pending" && (
+                                <p className="text-xs text-muted-foreground mt-2">
+                                  Waiting for review
+                                </p>
+                              )}
+                              {(selectedTask.userId === account ||
+                                (selectedTask.reviewerId &&
+                                  selectedTask.reviewerId === currentUserId)) &&
+                                proposal.status === "pending" && (
+                                  <div className="flex gap-2 justify-end mt-3">
+                                    <Button
+                                      size="sm"
+                                      onClick={() =>
+                                        handleApproveProposal(
+                                          selectedTask.id,
+                                          proposal.id
+                                        )
+                                      }
+                                      disabled={isManagingProposal}
+                                      className="gradient-button px-3"
+                                    >
+                                      Approve
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        handleRejectProposal(
+                                          selectedTask.id,
+                                          proposal.id
+                                        )
+                                      }
+                                      disabled={isManagingProposal}
+                                    >
+                                      Reject
+                                    </Button>
+                                  </div>
+                                )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3099,45 +3948,84 @@ export function KanbanBoard() {
                     </Button>
                   </div>
                 ) : (
-                  <div className="flex justify-between">
-                    {selectedTask.assigneeId === account &&
+                  (() => {
+                    const userIdentifier = currentUserId || account || "";
+                    const hasSubmittedProposal =
+                      selectedTask.proposals?.some(
+                        (proposal) =>
+                          proposal.userId === userIdentifier ||
+                          proposal.userId === account
+                      ) ?? false;
+                    const canSubmitProposal =
+                      selectedTask.isOpenBounty &&
+                      account &&
+                      selectedTask.userId !== account &&
+                      (!selectedTask.reviewerId ||
+                        selectedTask.reviewerId !== currentUserId) &&
+                      selectedTask.assigneeId !== userIdentifier &&
+                      !hasSubmittedProposal;
+                    const canSubmitWork =
+                      selectedTask.assigneeId === currentUserId &&
                       selectedTask.status === "inprogress" &&
-                      !selectedTask.submission && (
-                        <Button
-                          onClick={() => setIsSubmitDialogOpen(true)}
-                          className="gradient-button"
-                        >
-                          Submit Work
-                        </Button>
-                      )}
-
-                    {selectedTask.userId === account &&
+                      !selectedTask.submission;
+                    const canApproveSubmission =
                       selectedTask.status === "review" &&
-                      selectedTask.submission && (
-                        <div className="flex gap-2">
+                      selectedTask.submission &&
+                      (selectedTask.userId === account ||
+                        (selectedTask.reviewerId &&
+                          selectedTask.reviewerId === currentUserId));
+                    return (
+                      <div className="flex flex-wrap gap-2 justify-between w-full">
+                        <div className="flex flex-wrap gap-2">
+                          {canSubmitProposal && (
+                            <Button
+                              variant="outline"
+                              onClick={() => {
+                                setProposalTargetTask(selectedTask);
+                                setProposalContent("");
+                                handleProposalDialogChange(true);
+                              }}
+                            >
+                              Submit Proposal
+                            </Button>
+                          )}
+                          {canSubmitWork && (
+                            <Button
+                              onClick={() => setIsSubmitDialogOpen(true)}
+                              className="gradient-button"
+                            >
+                              Submit Work
+                            </Button>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2 ml-auto">
+                          {canApproveSubmission && (
+                            <>
+                              <Button
+                                variant="outline"
+                                onClick={handleRejectSubmission}
+                              >
+                                Reject
+                              </Button>
+                              <Button
+                                onClick={handleApproveSubmission}
+                                disabled={isLoading}
+                                className="gradient-button"
+                              >
+                                {isLoading ? "Approving..." : "Approve"}
+                              </Button>
+                            </>
+                          )}
                           <Button
                             variant="outline"
-                            onClick={handleRejectSubmission}
+                            onClick={() => setIsTaskDetailOpen(false)}
                           >
-                            Reject
-                          </Button>
-                          <Button
-                            onClick={handleApproveSubmission}
-                            disabled={isLoading}
-                            className="gradient-button"
-                          >
-                            {isLoading ? "Approving..." : "Approve"}
+                            Close
                           </Button>
                         </div>
-                      )}
-
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsTaskDetailOpen(false)}
-                    >
-                      Close
-                    </Button>
-                  </div>
+                      </div>
+                    );
+                  })()
                 )}
               </DialogFooter>
             </>
@@ -3216,6 +4104,46 @@ export function KanbanBoard() {
               ) : (
                 "Pay Now"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={isProposalDialogOpen}
+        onOpenChange={handleProposalDialogChange}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Submit Proposal</DialogTitle>
+            <DialogDescription>
+              Share your approach for "{proposalTargetTask?.title}"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="proposal-content">Proposal Details</Label>
+              <Textarea
+                id="proposal-content"
+                placeholder="Explain how you plan to deliver this task..."
+                value={proposalContent}
+                onChange={(e) => setProposalContent(e.target.value)}
+                className="min-h-[150px]"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => handleProposalDialogChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitProposal}
+              disabled={isSubmittingProposal || !proposalContent.trim()}
+              className="gradient-button"
+            >
+              {isSubmittingProposal ? "Submitting..." : "Submit Proposal"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3422,6 +4350,36 @@ export function KanbanBoard() {
                       {getSelectedTasksDetails().length}
                     </span>
                   </div>
+                </div>
+              </div>
+              <div className="grid gap-4">
+                <div className="flex items-start justify-between rounded-md border p-3">
+                  <div className="pr-4">
+                    <Label className="text-sm font-medium">Open Bounty</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Allow contributors to submit proposals for this task.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(newTask.isOpenBounty)}
+                    onCheckedChange={(checked) =>
+                      setNewTask({ ...newTask, isOpenBounty: checked })
+                    }
+                  />
+                </div>
+                <div className="flex items-start justify-between rounded-md border p-3">
+                  <div className="pr-4">
+                    <Label className="text-sm font-medium">Escrow Payment</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Lock the reward amount in escrow when the task is created.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={Boolean(newTask.escrowEnabled)}
+                    onCheckedChange={(checked) =>
+                      setNewTask({ ...newTask, escrowEnabled: checked })
+                    }
+                  />
                 </div>
               </div>
             </div>

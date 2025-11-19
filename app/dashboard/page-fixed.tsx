@@ -94,7 +94,7 @@ export default function MyTaskboardPage() {
   const fetchUserIdAndTasks = async () => {
     try {
       setIsLoading(true);
-      
+
       if (!account) {
         toast({
           title: "Error",
@@ -104,7 +104,7 @@ export default function MyTaskboardPage() {
         setIsLoading(false);
         return;
       }
-
+      setIsLoading(true);
       // Get user profile to retrieve the user ID
       const userProfile = await getUserProfile(account);
 
@@ -233,13 +233,13 @@ export default function MyTaskboardPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "todo":
-        return "bg-[hsl(var(--kanban-todo))] text-muted-foreground";
+        return "bg-muted text-muted-foreground";
       case "inprogress":
-        return "bg-[hsl(var(--kanban-in-progress))] text-muted-foreground";
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400";
       case "review":
-        return "bg-[hsl(var(--kanban-in-progress))] text-muted-foreground";
+        return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400";
       case "done":
-        return "bg-[hsl(var(--kanban-done))] text-muted-foreground";
+        return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
       default:
         return "bg-muted text-muted-foreground";
     }
@@ -248,11 +248,11 @@ export default function MyTaskboardPage() {
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "high":
-        return "priority-badge-high";
+        return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
       case "medium":
-        return "priority-badge-medium";
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
       case "low":
-        return "priority-badge-low";
+        return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
       default:
         return "bg-muted text-muted-foreground";
     }
@@ -269,11 +269,11 @@ export default function MyTaskboardPage() {
   const filteredTasks = getFilteredTasks();
 
   return (
-    <div className="flex h-screen dark-container">
+    <div className="flex h-screen bg-background">
       <Sidebar />
       <div className="flex-1 overflow-auto">
-        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-gray-200 bg-white/80 backdrop-blur-sm px-6 dark-header">
-          <h1 className="text-xl font-bold">Dashboard</h1>
+        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-border bg-background/95 backdrop-blur-sm px-6">
+          <h1 className="text-xl font-bold">My Taskboard</h1>
           <div className="flex items-center gap-4">
             <ThemeToggle />
             <WalletConnect />
@@ -283,7 +283,7 @@ export default function MyTaskboardPage() {
         <main className="animate-in fade-in duration-500 p-6">
           {/* Dashboard Statistics */}
           <div className="mb-8">
-            <h2 className="text-2xl font-bold mb-4">Statistics</h2>
+            <h2 className="text-2xl font-bold mb-4">Dashboard</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               {/* Total Tasks */}
               <Card>
@@ -307,12 +307,12 @@ export default function MyTaskboardPage() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-[hsl(var(--kanban-done-foreground))]" />
+                    <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
                     Completed
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[hsl(var(--kanban-done-foreground))]">
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                     {stats.completed}
                   </div>
                   <p className="text-xs text-muted-foreground">
@@ -330,12 +330,12 @@ export default function MyTaskboardPage() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-[hsl(var(--kanban-in-progress-foreground))]" />
+                    <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                     Pending
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[hsl(var(--kanban-in-progress-foreground))]">
+                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
                     {stats.pending}
                   </div>
                   <p className="text-xs text-muted-foreground">
@@ -348,13 +348,13 @@ export default function MyTaskboardPage() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <CreditCard className="h-4 w-4 text-[hsl(var(--kanban-done-foreground))]" />
+                    <CreditCard className="h-4 w-4 text-green-600 dark:text-green-400" />
                     Total Earnings
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[hsl(var(--kanban-done-foreground))]">
-                    {"$" + stats.totalEarnings}
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    {stats.totalEarnings}
                   </div>
                   <p className="text-xs text-muted-foreground">Paid rewards</p>
                 </CardContent>
@@ -364,13 +364,13 @@ export default function MyTaskboardPage() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 text-[hsl(var(--kanban-in-progress-foreground))]" />
+                    <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                     Pending Payments
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-[hsl(var(--kanban-in-progress-foreground))]">
-                    {"$" + stats.pendingPayments}
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {stats.pendingPayments}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Awaiting payment
@@ -479,22 +479,22 @@ export default function MyTaskboardPage() {
                               </Badge>
                             )}
                             {task.paid && (
-                              <Badge className="bg-[hsl(var(--kanban-done))] text-muted-foreground">
+                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
                                 ✓ Paid
                               </Badge>
                             )}
                             {task.submission?.status === "pending" && (
-                              <Badge className="bg-[hsl(var(--kanban-in-progress))] text-muted-foreground">
+                              <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
                                 Submission Pending
                               </Badge>
                             )}
                             {task.submission?.status === "approved" && (
-                              <Badge className="bg-[hsl(var(--kanban-done))] text-muted-foreground">
+                              <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
                                 ✓ Approved
                               </Badge>
                             )}
                             {task.submission?.status === "rejected" && (
-                              <Badge className="bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))]">
+                              <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
                                 ✗ Rejected
                               </Badge>
                             )}

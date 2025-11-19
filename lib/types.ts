@@ -17,7 +17,14 @@ export interface Task {
   rewardAmount?: number
   userId: string
   assigneeId?: string
+  reviewerId?: string
+  projectId?: string
   assignee?: {
+    id: string
+    username: string
+    profilePicture: string
+  }
+  reviewer?: {
     id: string
     username: string
     profilePicture: string
@@ -29,8 +36,22 @@ export interface Task {
     feedback?: string
   }
   paid?: boolean
+  isOpenBounty?: boolean
+  proposals?: TaskProposal[]
+  escrowEnabled?: boolean
+  escrowStatus?: "locked" | "released" | "refunded"
   createdAt: string
   updatedAt?: string
+}
+
+export interface TaskProposal {
+  id: string
+  userId: string
+  username: string
+  profilePicture?: string
+  message: string
+  status: "pending" | "approved" | "rejected"
+  submittedAt: string
 }
 
 export interface Bounty {
@@ -53,7 +74,7 @@ export interface Project {
   description: string
   status: "active" | "completed" | "archived"
   createdBy: string
-  members?: string[]
+  members?: ProjectMember[] | null
   createdAt: string
   updatedAt?: string
   dueDate?: string
@@ -61,3 +82,12 @@ export interface Project {
   tags?: string[]
   coverImage?: string
 }
+
+export interface ProjectMember {
+  userId: string
+  role: "admin" | "manager" | "contributor"
+  joinedAt: string
+  invitedBy?: string
+  isActive: boolean
+}
+
