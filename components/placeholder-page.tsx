@@ -28,7 +28,7 @@ export function PlaceholderPage({
 
           <div className="relative mt-8 w-full max-w-md">
             <Image
-              src="/public/images/under-construction.png"
+              src="/images/under-construction.jpg"
               alt="Under Construction"
               width={500}
               height={300}

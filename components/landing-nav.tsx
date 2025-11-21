@@ -46,10 +46,10 @@ export function LandingNav() {
   }, [])
 
   const navItems: NavItem[] = [
-    { name: "Features", href: "#features" },
-    { name: "AI Integration", href: "#ai" },
-    { name: "Testimonials", href: "#testimonials" },
-    { name: "Pricing", href: "#pricing" },
+    // { name: "Features", href: "#features" },
+    // { name: "AI Integration", href: "#ai" },
+    // { name: "Testimonials", href: "#testimonials" },
+    // { name: "Pricing", href: "#pricing" },
   ]
 
   const scrollToSection = (href: string) => {
@@ -73,70 +73,70 @@ export function LandingNav() {
   }
 
   return (
-    <>
-      {/* Desktop Navigation */}
-      <nav className="hidden md:flex items-center gap-6">
-        {navItems.map((item) => (
-          <Link
-            key={item.name}
-            href={item.href}
-            className={cn(
-              "text-sm font-medium transition-colors hover:text-primary",
-              activeSection === item.href.replace("#", "") ? "text-primary" : "text-foreground/70",
-            )}
-            onClick={(e) => {
-              e.preventDefault()
-              scrollToSection(item.href)
-            }}
-          >
-            {item.name}
-          </Link>
-        ))}
-      </nav>
+    // <>
+    //   {/* Desktop Navigation */}
+    //   <nav className="hidden md:flex items-center gap-6">
+    //     {navItems.map((item) => (
+    //       <Link
+    //         key={item.name}
+    //         href={item.href}
+    //         className={cn(
+    //           "text-sm font-medium transition-colors hover:text-primary",
+    //           activeSection === item.href.replace("#", "") ? "text-primary" : "text-foreground/70",
+    //         )}
+    //         onClick={(e) => {
+    //           e.preventDefault()
+    //           scrollToSection(item.href)
+    //         }}
+    //       >
+    //         {item.name}
+    //       </Link>
+    //     ))}
+    //   </nav>
 
-      {/* Mobile Navigation Toggle */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="md:hidden"
-        onClick={(e) => {
-          e.stopPropagation()
-          setMobileMenuOpen(!mobileMenuOpen)
-        }}
-        aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
-      >
-        {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-      </Button>
+    //   {/* Mobile Navigation Toggle */}
+    //   <Button
+    //     variant="ghost"
+    //     size="icon"
+    //     className="md:hidden"
+    //     onClick={(e) => {
+    //       e.stopPropagation()
+    //       setMobileMenuOpen(!mobileMenuOpen)
+    //     }}
+    //     aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+    //   >
+    //     {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+    //   </Button>
 
-      {/* Mobile Navigation Menu */}
-      {mobileMenuOpen && (
-        <div
-          className="absolute top-16 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b md:hidden"
-          data-mobile-menu
-        >
-          <nav className="container py-4">
-            <ul className="flex flex-col space-y-4">
-              {navItems.map((item) => (
-                <li key={item.name}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "block py-2 text-base font-medium transition-colors hover:text-primary",
-                      activeSection === item.href.replace("#", "") ? "text-primary" : "text-foreground/70",
-                    )}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      scrollToSection(item.href)
-                    }}
-                  >
-                    {item.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </div>
-      )}
-    </>
-  )
+    //   {/* Mobile Navigation Menu */}
+    //   {mobileMenuOpen && (
+    //     <div
+    //       className="absolute top-16 left-0 right-0 z-50 bg-background/95 backdrop-blur-sm border-b md:hidden"
+    //       data-mobile-menu
+    //     >
+    //       <nav className="container py-4">
+    //         <ul className="flex flex-col space-y-4">
+    //           {navItems.map((item) => (
+    //             <li key={item.name}>
+    //               <Link
+    //                 href={item.href}
+    //                 className={cn(
+    //                   "block py-2 text-base font-medium transition-colors hover:text-primary",
+    //                   activeSection === item.href.replace("#", "") ? "text-primary" : "text-foreground/70",
+    //                 )}
+    //                 onClick={(e) => {
+    //                   e.preventDefault()
+    //                   scrollToSection(item.href)
+    //                 }}
+    //               >
+    //                 {item.name}
+    //               </Link>
+    //             </li>
+    //           ))}
+    //         </ul>
+    //       </nav>
+    //     </div>
+    //   )}
+    // </>
+  null )
 }

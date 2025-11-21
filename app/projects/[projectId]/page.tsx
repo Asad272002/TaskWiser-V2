@@ -45,16 +45,9 @@ export default function ProjectBoardPage() {
         return;
       }
 
-      // Check if user has access to this project
-      const isOwner = fetchedProject.createdBy === account;
-      const isManager = fetchedProject.members?.includes(account || "");
-
-      if (!isOwner && !isManager) {
-        setError("You don't have access to this project");
-        return;
-      }
-
       setProject(fetchedProject);
+      // Note: Membership check is now handled in the KanbanBoard component
+      // which has access to getUserProfile to properly check member IDs
     } catch (err) {
       console.error("Error fetching project:", err);
       setError("Failed to load project");

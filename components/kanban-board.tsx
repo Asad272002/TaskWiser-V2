@@ -80,7 +80,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import type { Task, TaskProposal, UserProfile } from "@/lib/types";
+import type { Task, TaskProposal, UserProfile, Project } from "@/lib/types";
 import { format } from "date-fns";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PaymentPopup } from "./payment-popup";
@@ -105,6 +105,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     getUserProfiles,
     getUserProfile,
     getUserProfileById,
+    getProjectById,
   } = useFirebase();
   const { account } = useWeb3();
   const { toast } = useToast();
@@ -169,6 +170,9 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [showRewardSection, setShowRewardSection] = useState(false);
   const [showAssigneeSection, setShowAssigneeSection] = useState(false);
+  const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const [isProjectMember, setIsProjectMember] = useState(false);
+  const [userProjectRole, setUserProjectRole] = useState<"admin" | "manager" | "contributor" | null>(null);
   // New states for payment popup
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [taskBeingPaid, setTaskBeingPaid] = useState<Task | null>(null);
@@ -208,6 +212,13 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
   const firebase = useFirebase();
   const isProjectView = Boolean(projectId);
+  
+  // Check if user is a contributor (limited permissions)
+  const isContributor = projectId && userProjectRole === "contributor";
+  const canCreateTasks = !isContributor; // Contributors cannot create tasks
+  const canDragTasks = !isContributor; // Contributors cannot drag tasks
+  const canProcessBatchPayment = projectId ? userProjectRole === "admin" : true; // Only admins can process batch payments in projects
+  
   const generateId = () =>
     typeof globalThis.crypto !== "undefined" &&
     typeof globalThis.crypto.randomUUID === "function"
@@ -285,9 +296,9 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         }
       }
 
-      // Ctrl/Cmd + Shift + P: Process batch payment (if tasks selected)
+      // Ctrl/Cmd + Shift + P: Process batch payment (if tasks selected and has permission)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "P") {
-        if (selectedTasks.size > 0) {
+        if (selectedTasks.size > 0 && canProcessBatchPayment) {
           e.preventDefault();
           setIsBatchPaymentOpen(true);
         }
@@ -469,13 +480,64 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       let allFetchedTasks: Task[] = [];
 
       if (projectId) {
-        // For project board: fetch all tasks and filter by projectId
+        // For project board: first check if user is a member
+        const project = await getProjectById(projectId);
+        setCurrentProject(project);
+        
+        if (!project) {
+          toast({
+            title: "Project not found",
+            description: "The project you're looking for doesn't exist",
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        // Get current user's profile to check membership
+        const userProfile = await getUserProfile(account);
+        const userId = userProfile?.id || account;
+
+        // Check if user is the creator OR a project member
+        const isCreator = project.createdBy === account;
+        const memberInfo = project.members?.find(
+          (member: any) => member.userId === userId && member.isActive
+        );
+        
+        const isMember = !!memberInfo;
+        setIsProjectMember(isCreator || isMember);
+
+        // Set user's role in the project
+        if (isCreator) {
+          setUserProjectRole("admin");
+        } else if (memberInfo) {
+          setUserProjectRole(memberInfo.role);
+        } else {
+          setUserProjectRole(null);
+        }
+
+        if (!isCreator && !isMember) {
+          toast({
+            title: "Access Denied",
+            description: "You are not a member of this project",
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        // Fetch all tasks and filter by projectId
         const allTasks = await getAllTasks();
         allFetchedTasks = allTasks.filter(
           (task: Task) => (task as any).projectId === projectId
         );
       } else {
-        // For personal board: fetch tasks created by user
+        // For personal board: reset project-specific states
+        setCurrentProject(null);
+        setIsProjectMember(false);
+        setUserProjectRole(null);
+        
+        // Fetch tasks created by user
         const userCreatedTasks = await getTasks(account);
         setCreatedTasks(userCreatedTasks);
 
@@ -662,25 +724,51 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
     try {
       const timestamp = new Date().toISOString();
-      // Convert "no_reward" to undefined for the reward field
-      const normalizedTask: Omit<Task, "id" | "userId" | "createdAt"> = {
-        ...newTask,
-        reward: newTask.reward === "no_reward" ? undefined : newTask.reward,
-        isOpenBounty: Boolean(newTask.isOpenBounty),
-        escrowEnabled: Boolean(newTask.escrowEnabled),
-        escrowStatus: newTask.escrowEnabled ? "locked" : undefined,
-        proposals: newTask.isOpenBounty ? ([] as TaskProposal[]) : undefined,
-      };
-
-      const taskToCreate = {
-        ...normalizedTask,
+      
+      // Build task object without undefined fields
+      const taskToCreate: any = {
+        title: newTask.title,
+        description: newTask.description || "",
+        status: newTask.status,
+        priority: newTask.priority,
         userId: account,
         createdAt: timestamp,
         updatedAt: timestamp,
-        ...(projectId && { projectId }),
+        isOpenBounty: Boolean(newTask.isOpenBounty),
+        escrowEnabled: Boolean(newTask.escrowEnabled),
       };
 
+      // Only add optional fields if they have values
+      if (newTask.reward && newTask.reward !== "no_reward") {
+        taskToCreate.reward = newTask.reward;
+      }
+      if (newTask.rewardAmount) {
+        taskToCreate.rewardAmount = newTask.rewardAmount;
+      }
+      if (newTask.assigneeId) {
+        taskToCreate.assigneeId = newTask.assigneeId;
+      }
+      if (newTask.reviewerId) {
+        taskToCreate.reviewerId = newTask.reviewerId;
+      }
+      if (projectId) {
+        taskToCreate.projectId = projectId;
+      }
+      if (newTask.escrowEnabled) {
+        taskToCreate.escrowStatus = "locked";
+      }
+      if (newTask.isOpenBounty) {
+        taskToCreate.proposals = [];
+      }
+
+      console.log("Creating task with data:", taskToCreate);
       const taskId = await addTask(taskToCreate);
+      
+      if (!taskId) {
+        throw new Error("Failed to create task - no ID returned");
+      }
+      
+      console.log("Task created successfully with ID:", taskId);
 
       // If an assignee was selected, find their details
       let assignee;
@@ -712,11 +800,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       }
 
       const newTaskWithId: Task = {
+        ...taskToCreate,
         id: taskId,
-        ...normalizedTask,
-        userId: account,
-        createdAt: timestamp,
-        updatedAt: timestamp,
         assignee,
         reviewer,
       };
@@ -1482,6 +1567,16 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   //   }
   // }
   const onDragEnd = async (result: any) => {
+    // Prevent dragging if user doesn't have permission
+    if (!canDragTasks) {
+      toast({
+        title: "Permission Denied",
+        description: "Contributors cannot move tasks",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const { destination, source, draggableId } = result;
 
     if (
@@ -1779,6 +1874,16 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
   // Process batch payment
   const processBatchPayment = async () => {
+    // Check if user has permission to process batch payment
+    if (!canProcessBatchPayment) {
+      toast({
+        title: "Permission Denied",
+        description: "Only project admins can process batch payments",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsProcessingBatchPayment(true);
 
     try {
@@ -1966,6 +2071,52 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
           : "flex flex-col gap-4"
       }`}
     >
+      {/* Project Header - Show when viewing a project board */}
+      {projectId && currentProject && isProjectMember && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {currentProject.title}
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {currentProject.description}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="flex items-center gap-1">
+                <User className="h-3 w-3" />
+                {(currentProject.members?.length || 0)} member{((currentProject.members?.length || 0)) !== 1 ? 's' : ''}
+              </Badge>
+              {userProjectRole && (
+                <Badge 
+                  variant={userProjectRole === "admin" ? "default" : userProjectRole === "manager" ? "secondary" : "outline"}
+                  className="capitalize"
+                >
+                  {userProjectRole}
+                </Badge>
+              )}
+            </div>
+          </div>
+          {isContributor && (
+            <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
+              <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                You're viewing this project as a contributor. You can view tasks but cannot create, move, or process payments.
+              </p>
+            </div>
+          )}
+          {userProjectRole === "manager" && (
+            <div className="mt-3 flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-md border border-amber-200 dark:border-amber-800">
+              <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                As a manager, you can create and manage tasks but only admins can process batch payments.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+      
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-2">
           {/* <Button variant="ghost" size="icon" className="rounded-full">
@@ -1978,21 +2129,22 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
           )}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-          <Dialog
-            open={isDialogOpen}
-            onOpenChange={(open) => {
-              setIsDialogOpen(open);
-              if (!open) {
-                setShowRewardSection(false);
-              }
-            }}
-          > 
-            <DialogTrigger asChild>
-              <Button className="gradient-button">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Task
-              </Button>
-            </DialogTrigger>
+          {canCreateTasks && (
+            <Dialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                setIsDialogOpen(open);
+                if (!open) {
+                  setShowRewardSection(false);
+                }
+              }}
+            > 
+              <DialogTrigger asChild>
+                <Button className="gradient-button">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Task
+                </Button>
+              </DialogTrigger>
             <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-0">
               <DialogHeader className="px-6 pt-6 pb-4 border-b">
                 <div className="flex items-center justify-between">
@@ -2144,6 +2296,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
               </div>
             </DialogContent>
           </Dialog>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -2241,40 +2394,6 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
           </div>
         </div>
       </div>
-
-      {!projectId && (
-        <div>
-          <Tabs
-            value={activeView}
-            onValueChange={setActiveView}
-            className="w-full md:w-auto"
-          >
-            <TabsList className="bg-white/80 dark:bg-[#1e1e1e] p-1 shadow-sm">
-              <TabsTrigger
-                value="all"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
-              >
-                <Circle className="h-4 w-4" />
-                All Tasks
-              </TabsTrigger>
-              <TabsTrigger
-                value="created"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
-              >
-                <FileEdit className="h-4 w-4 text-purple-500" />
-                Created by Me
-              </TabsTrigger>
-              <TabsTrigger
-                value="assigned"
-                className="gap-2 data-[state=active]:bg-primary data-[state=active]:text-white"
-              >
-                <UserCircle className="h-4 w-4 text-blue-500" />
-                Assigned to Me
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      )}
 
       <div className={`flex-1 min-h-0 ${isProjectView ? "overflow-hidden" : ""}`}>
         {isLoading ? (
@@ -2392,7 +2511,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                           key={task.id}
                                           draggableId={task.id}
                                           index={currentIndex}
-                                          isDragDisabled={false}
+                                          isDragDisabled={!canDragTasks}
                                         >
                                           {(provided, snapshot) => (
                                             <TaskCard
@@ -2439,7 +2558,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                           key={task.id}
                                           draggableId={task.id}
                                           index={currentIndex}
-                                          isDragDisabled={false}
+                                          isDragDisabled={!canDragTasks}
                                         >
                                           {(provided, snapshot) => (
                                             <TaskCard
@@ -2498,7 +2617,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                             key={task.id}
                             draggableId={task.id}
                             index={index}
-                            isDragDisabled={false}
+                            isDragDisabled={!canDragTasks}
                           >
                             {(provided, snapshot) => (
                               <TaskCard
@@ -3288,12 +3407,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
               <Button variant="outline" onClick={clearSelection}>
                 Clear Selection
               </Button>
-              <Button
-                onClick={() => setIsBatchPaymentOpen(true)}
-                className="gradient-button"
-              >
-                Process Payment
-              </Button>
+              {canProcessBatchPayment && (
+                <Button
+                  onClick={() => setIsBatchPaymentOpen(true)}
+                  className="gradient-button"
+                >
+                  Process Payment
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -3435,6 +3556,15 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
             </DialogDescription>
           </DialogHeader>
 
+          {!canProcessBatchPayment && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800">
+              <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+              <p className="text-xs text-red-600 dark:text-red-400">
+                Only project admins can process batch payments. Contact your project admin.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-4 py-4">
             {/* Payment Summary */}
             <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4">
@@ -3528,7 +3658,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
             </Button>
             <Button
               onClick={processBatchPayment}
-              disabled={isProcessingBatchPayment}
+              disabled={isProcessingBatchPayment || !canProcessBatchPayment}
               className="gradient-button gap-2"
             >
               {isProcessingBatchPayment ? (

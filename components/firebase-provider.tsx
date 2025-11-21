@@ -344,16 +344,25 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const addTask = async (task: any) => {
     if (!db) {
       console.error("Firestore is not initialized");
-      return "";
+      throw new Error("Firestore is not initialized");
     }
     try {
-      const docRef = await addDoc(collection(db, "tasks"), task);
-        // Also save the ID in the document itself for easier querying
-        await updateDoc(docRef, { id: docRef.id });
-        return docRef.id;
+      // Remove undefined fields as Firestore doesn't handle them well
+      const cleanTask = Object.fromEntries(
+        Object.entries(task).filter(([_, value]) => value !== undefined)
+      );
+      
+      console.log("Adding task to Firestore:", cleanTask);
+      const docRef = await addDoc(collection(db, "tasks"), cleanTask);
+      console.log("Task added with ID:", docRef.id);
+      
+      // Also save the ID in the document itself for easier querying
+      await updateDoc(docRef, { id: docRef.id });
+      return docRef.id;
     } catch (error) {
-      console.error("Error adding task:", error);
-      return "";
+      console.error("Error adding task to Firestore:", error);
+      // Re-throw the error so the caller can handle it properly
+      throw error;
     }
   };
 
