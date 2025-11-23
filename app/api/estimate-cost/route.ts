@@ -119,16 +119,36 @@ export async function POST(req: NextRequest) {
     const suggestedRate = computeSuggestedBaseRate(Array.isArray(tags) ? tags : [], priority, title, description, hours);
     const totalUSD = Math.max(0, Math.round(hours * suggestedRate));
 
+    const breakdown = parsed.breakdown ?? {};
     const estimate: CostEstimate = {
       totalUSD,
       estimatedHours: hours,
       baseRateUSD: suggestedRate,
       breakdown: {
-        lengthHours: Number(parsed.breakdown?.lengthHours ?? 0),
-        titleKeywordHours: Number(parsed.breakdown?.titleKeywordHours ?? 0),
-        descriptionKeywordHours: Number(parsed.breakdown?.descriptionKeywordHours ?? 0),
-        tagsMultiplier: Number(parsed.breakdown?.tagsMultiplier ?? 1),
-        priorityMultiplier: Number(parsed.breakdown?.priorityMultiplier ?? 1),
+        lengthHours: Number(breakdown.lengthHours ?? baseline.breakdown.lengthHours ?? 0),
+        titleHoursAdj: Number(
+          breakdown.titleKeywordHours ??
+            breakdown.titleHoursAdj ??
+            baseline.breakdown.titleHoursAdj ??
+            0
+        ),
+        descriptionHoursAdj: Number(
+          breakdown.descriptionKeywordHours ??
+            breakdown.descriptionHoursAdj ??
+            baseline.breakdown.descriptionHoursAdj ??
+            0
+        ),
+        tagMultiplier: Number(
+          breakdown.tagsMultiplier ??
+            breakdown.tagMultiplier ??
+            baseline.breakdown.tagMultiplier ??
+            1
+        ),
+        priorityMultiplier: Number(
+          breakdown.priorityMultiplier ??
+            baseline.breakdown.priorityMultiplier ??
+            1
+        ),
       },
     };
 
@@ -159,4 +179,3 @@ export async function POST(req: NextRequest) {
     }
   }
 }
-
