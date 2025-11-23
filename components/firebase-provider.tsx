@@ -100,26 +100,32 @@ const FirebaseContext = createContext<FirebaseContextType>({
   storage: null,
   user: null,
   isInitialized: false,
-  addTask: async () => "",
-  getTasks: async () => [],
-  getAllTasks: async () => [],
-  updateTask: async () => {},
-  deleteTask: async () => {},
-  getBounties: async () => [],
-  addTaskSubmission: async () => "",
-  approveTaskSubmission: async () => {},
-  getUserProfile: async () => null,
-  getUserProfiles: async () => [],
-  getUserProfileById: async () => null,
-  createUserProfile: async () => "",
-  updateUserProfile: async () => {},
-  uploadProfilePicture: async () => "",
-  uploadProjectLogo: async () => "",
-  addProject: async () => "",
-  getProjects: async () => [],
-  getProjectById: async () => null,
-  updateProject: async () => {},
-  deleteProject: async () => {},
+  addTask: async (): Promise<string> => "",
+  getTasks: async (): Promise<any[]> => [],
+  getAllTasks: async (): Promise<any[]> => [],
+  updateTask: async (): Promise<void> => {},
+  deleteTask: async (): Promise<void> => {},
+  getBounties: async (): Promise<any[]> => [],
+  addTaskSubmission: async (): Promise<string> => "",
+  approveTaskSubmission: async (): Promise<void> => {},
+  getUserProfile: async (): Promise<UserProfile | null> => null,
+  getUserProfiles: async (): Promise<UserProfile[]> => [],
+  getUserProfileById: async (): Promise<UserProfile | null> => null,
+  createUserProfile: async (): Promise<string> => "",
+  updateUserProfile: async (): Promise<void> => {},
+  uploadProfilePicture: async (): Promise<string> => "",
+  uploadProjectLogo: async (): Promise<string> => "",
+  addProject: async (): Promise<string> => "",
+  getProjects: async (): Promise<any[]> => [],
+  getProjectById: async (): Promise<any> => null,
+  updateProject: async (): Promise<void> => {},
+  deleteProject: async (): Promise<void> => {},
+  inviteUserToProject: async (): Promise<string> => "",
+  getProjectInvitationsForUser: async (): Promise<any[]> => [],
+  respondToProjectInvitation: async (): Promise<void> => {},
+  applyToJoinProject: async (): Promise<string> => "",
+  getJoinRequestsForProject: async (): Promise<any[]> => [],
+  respondToProjectJoinRequest: async (): Promise<void> => {},
 });
 
 export const useFirebase = () => useContext(FirebaseContext);
@@ -521,6 +527,76 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error("Error getting bounties:", error);
       return [];
+    }
+  };
+
+  // Task submissions for open bounties
+  const addTaskSubmission = async (
+    taskId: string,
+    submission: { userId: string; content: string }
+  ): Promise<string> => {
+    if (!db) {
+      console.error("Firestore is not initialized");
+      return "";
+    }
+    try {
+      const { doc: docFn, getDoc } = await import("firebase/firestore");
+      const taskRef = docFn(db, "tasks", taskId);
+      const taskDoc = await getDoc(taskRef);
+      if (!taskDoc.exists()) {
+        console.error("Task not found for submission");
+        return "";
+      }
+      const taskData = taskDoc.data() as any;
+      const submissions = Array.isArray(taskData.submissions)
+        ? taskData.submissions
+        : [];
+      const newSubmission = {
+        id:
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2),
+        userId: submission.userId,
+        content: submission.content,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      };
+      await updateDoc(taskRef, { submissions: [...submissions, newSubmission] });
+      return newSubmission.id;
+    } catch (error) {
+      console.error("Error adding task submission:", error);
+      return "";
+    }
+  };
+
+  const approveTaskSubmission = async (
+    taskId: string,
+    submissionId: string
+  ): Promise<void> => {
+    if (!db) {
+      console.error("Firestore is not initialized");
+      return;
+    }
+    try {
+      const { doc: docFn, getDoc } = await import("firebase/firestore");
+      const taskRef = docFn(db, "tasks", taskId);
+      const taskDoc = await getDoc(taskRef);
+      if (!taskDoc.exists()) {
+        console.error("Task not found when approving submission");
+        return;
+      }
+      const taskData = taskDoc.data() as any;
+      const submissions = Array.isArray(taskData.submissions)
+        ? taskData.submissions
+        : [];
+      const updatedSubmissions = submissions.map((s: any) =>
+        s.id === submissionId
+          ? { ...s, status: "approved", approvedAt: new Date().toISOString() }
+          : s
+      );
+      await updateDoc(taskRef, { submissions: updatedSubmissions });
+    } catch (error) {
+      console.error("Error approving task submission:", error);
     }
   };
 
@@ -937,65 +1013,4 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
       {children}
     </FirebaseContext.Provider>
   );
-}
-
-// Task submissions for open bounties
-const addTaskSubmission = async (
-  taskId: string,
-  submission: { userId: string; content: string }
-): Promise<string> => {
-  if (!db) {
-    console.error("Firestore is not initialized")
-    return ""
-  }
-  try {
-    const { doc: docFn, getDoc } = await import("firebase/firestore")
-    const taskRef = docFn(db, "tasks", taskId)
-    const taskDoc = await getDoc(taskRef)
-    if (!taskDoc.exists()) {
-      console.error("Task not found for submission")
-      return ""
-    }
-    const taskData = taskDoc.data() as any
-    const submissions = Array.isArray(taskData.submissions) ? taskData.submissions : []
-    const newSubmission = {
-      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-      userId: submission.userId,
-      content: submission.content,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    }
-    await updateDoc(taskRef, { submissions: [...submissions, newSubmission] })
-    return newSubmission.id
-  } catch (error) {
-    console.error("Error adding task submission:", error)
-    return ""
-  }
-}
-
-const approveTaskSubmission = async (
-  taskId: string,
-  submissionId: string
-): Promise<void> => {
-  if (!db) {
-    console.error("Firestore is not initialized")
-    return
-  }
-  try {
-    const { doc: docFn, getDoc } = await import("firebase/firestore")
-    const taskRef = docFn(db, "tasks", taskId)
-    const taskDoc = await getDoc(taskRef)
-    if (!taskDoc.exists()) {
-      console.error("Task not found when approving submission")
-      return
-    }
-    const taskData = taskDoc.data() as any
-    const submissions = Array.isArray(taskData.submissions) ? taskData.submissions : []
-    const updatedSubmissions = submissions.map((s: any) =>
-      s.id === submissionId ? { ...s, status: "approved", approvedAt: new Date().toISOString() } : s
-    )
-    await updateDoc(taskRef, { submissions: updatedSubmissions })
-  } catch (error) {
-    console.error("Error approving task submission:", error)
-  }
 }

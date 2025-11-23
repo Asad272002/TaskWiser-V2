@@ -738,43 +738,16 @@ export default function ProjectsPage() {
                       {project.status.charAt(0).toUpperCase() +
                         project.status.slice(1)}
                     </Badge>
-                    <div className="ml-2 flex -space-x-2">
-                      {(() => {
-                        // Get admin member
-                        const adminMember = project.members?.find((m: ProjectMember) => m.role === "admin");
-                        const adminProfile = adminMember ? availableUsers.find(u => u.id === adminMember.userId) : null;
-                        
-                        // Get manager member
-                        const managerMember = project.members?.find((m: ProjectMember) => m.role === "manager");
-                        const managerProfile = managerMember ? availableUsers.find(u => u.id === managerMember.userId) : null;
-
-                        return (
-                          <>
-                            {adminProfile && (
-                              <Avatar className="h-6 w-6 border-2 border-background dark:border-gray-800">
-                                <AvatarImage
-                                  src={adminProfile.profilePicture || "/placeholder.svg"}
-                                  alt={adminProfile.username}
-                                />
-                                <AvatarFallback className="dark:bg-gray-700 dark:text-gray-300">
-                                  {adminProfile.username?.substring(0, 2).toUpperCase() || "AD"}
-                                </AvatarFallback>
-                              </Avatar>
-                            )}
-                            {managerProfile && (
-                              <Avatar className="h-6 w-6 border-2 border-background dark:border-gray-800">
-                                <AvatarImage
-                                  src={managerProfile.profilePicture || "/placeholder.svg"}
-                                  alt={managerProfile.username}
-                                />
-                                <AvatarFallback className="dark:bg-gray-700 dark:text-gray-300">
-                                  {managerProfile.username?.substring(0, 2).toUpperCase() || "MG"}
-                                </AvatarFallback>
-                              </Avatar>
-                            )}
-                          </>
-                        );
-                      })()}
+                    <div className="ml-3">
+                      <Avatar className="h-8 w-8 border border-background dark:border-gray-700">
+                        <AvatarImage
+                          src={project.logoUrl || "/placeholder.svg"}
+                          alt={project.title}
+                        />
+                        <AvatarFallback className="dark:bg-gray-700 dark:text-gray-300">
+                          {project.title?.substring(0, 2).toUpperCase() || "PJ"}
+                        </AvatarFallback>
+                      </Avatar>
                     </div>
                   </div>
                 </CardFooter>

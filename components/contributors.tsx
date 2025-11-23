@@ -33,10 +33,10 @@ export function Contributors() {
   const loadContributors = async () => {
     setIsLoading(true)
     try {
-      const [profiles, tasks] = await Promise.all<[
-        UserProfile[],
-        Task[]
-      ]>([getUserProfiles(), getAllTasks()])
+      const [profiles, tasks] = (await Promise.all([
+        getUserProfiles(),
+        getAllTasks(),
+      ])) as [UserProfile[], Task[]]
 
       const normalizedTasks = (tasks || [])
       const mapped: Contributor[] = (profiles || []).map((p) => {
