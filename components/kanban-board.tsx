@@ -89,6 +89,7 @@ import { Progress } from "@/components/ui/progress";
 import { deleteField } from "firebase/firestore";
 import { ThreeBackground } from "./three-bg";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { estimateTaskCostUSD, type CostEstimate } from "@/lib/cost-estimator";
 
 type Column = {
   id: string;
@@ -157,6 +158,60 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     escrowEnabled: false,
     tags: [],
   });
+
+  // Real-time cost estimate (admin-only UI will render this)
+  const costEstimate = useMemo(() =>
+    estimateTaskCostUSD({
+      title: newTask.title || "",
+      description: newTask.description || "",
+      tags: newTask.tags || [],
+      priority: newTask.priority || "medium",
+    }),
+    [newTask.title, newTask.description, newTask.tags, newTask.priority]
+  );
+  // AI estimator state
+  const [useAIEstimator, setUseAIEstimator] = useState(false);
+  const [aiEstimate, setAiEstimate] = useState<CostEstimate | null>(null);
+  const [aiEstimating, setAiEstimating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!useAIEstimator) {
+      setAiEstimate(null);
+      return;
+    }
+    const payload = {
+      title: newTask.title || "",
+      description: newTask.description || "",
+      tags: newTask.tags || [],
+      priority: newTask.priority || "medium",
+    };
+    setAiEstimating(true);
+    setAiError(null);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/estimate-cost", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (res.ok && data?.estimate) {
+          setAiEstimate(data.estimate as CostEstimate);
+        } else {
+          setAiError("Estimation failed");
+          setAiEstimate(null);
+        }
+      } catch (e) {
+        setAiError("Network error");
+        setAiEstimate(null);
+      } finally {
+        setAiEstimating(false);
+      }
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [useAIEstimator, newTask.title, newTask.description, newTask.tags, newTask.priority]);
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -1209,6 +1264,9 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         updatedAt: timestamp,
         isOpenBounty: Boolean(newTask.isOpenBounty),
         escrowEnabled: Boolean(newTask.escrowEnabled),
+        // Persist estimated cost for reporting/analytics
+        estimatedCostUSD: useAIEstimator && aiEstimate ? aiEstimate.totalUSD : costEstimate?.totalUSD,
+        estimatedHours: useAIEstimator && aiEstimate ? aiEstimate.estimatedHours : costEstimate?.estimatedHours,
       };
 
       // Only add optional fields if they have values
@@ -2830,6 +2888,58 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                       {analysisTag ? `Tag: ${String(analysisTag)}` : "General performance"}
                     </div>
 
+                    {/* Estimated Cost Card */}
+                    <div className="space-y-2 rounded-xl border shadow-sm backdrop-blur-sm bg-white/80 dark:bg-[#1e1e1e]/70 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-xs font-semibold tracking-wide uppercase">Estimated Cost (USD)</div>
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor="ai-estimator" className="text-[10px]">Use AI</Label>
+                          <Switch id="ai-estimator" checked={useAIEstimator} onCheckedChange={setUseAIEstimator} />
+                          <Badge variant="outline" className="text-[10px]">Real-time</Badge>
+                        </div>
+                      </div>
+                      {useAIEstimator ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-2xl font-bold">${aiEstimate ? aiEstimate.totalUSD.toLocaleString() : '0'}</div>
+                            {aiEstimating && <span className="text-[10px] text-muted-foreground">Estimating…</span>}
+                          </div>
+                          {aiError ? (
+                            <div className="text-[11px] text-red-600">{aiError}</div>
+                          ) : (
+                            <div className="text-[11px] text-muted-foreground">Est. Hours: {aiEstimate?.estimatedHours ?? 0} @ ${aiEstimate?.baseRateUSD ?? 50}/hr</div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-2xl font-bold">${typeof costEstimate?.totalUSD === 'number' ? costEstimate.totalUSD.toLocaleString() : '0'}</div>
+                          <div className="text-[11px] text-muted-foreground">Est. Hours: {costEstimate?.estimatedHours ?? 0} @ ${costEstimate?.baseRateUSD ?? 50}/hr</div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
+                              <div className="font-medium">Length</div>
+                              <div className="text-muted-foreground">{costEstimate?.breakdown.lengthHours ?? 0}h</div>
+                            </div>
+                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
+                              <div className="font-medium">Title</div>
+                              <div className="text-muted-foreground">+{costEstimate?.breakdown.titleHoursAdj ?? 0}h</div>
+                            </div>
+                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
+                              <div className="font-medium">Description</div>
+                              <div className="text-muted-foreground">+{costEstimate?.breakdown.descriptionHoursAdj ?? 0}h</div>
+                            </div>
+                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
+                              <div className="font-medium">Tags</div>
+                              <div className="text-muted-foreground">x{costEstimate?.breakdown.tagMultiplier ?? 1}</div>
+                            </div>
+                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
+                              <div className="font-medium">Priority</div>
+                              <div className="text-muted-foreground">x{costEstimate?.breakdown.priorityMultiplier ?? 1}</div>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
                     {!!contributorStats.length ? (
                       <div className="space-y-3">
                         {contributorStats.slice(0, 4).map((s, idx) => {
@@ -2989,6 +3099,11 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
                   {/* Create Button */}
                   <div className="pt-4">
+                    {userProjectRole === "admin" && (
+                      <div className="mb-2 text-xs text-muted-foreground">
+                        Estimated Cost: ${useAIEstimator && aiEstimate ? aiEstimate.totalUSD.toLocaleString() : (typeof costEstimate?.totalUSD === 'number' ? costEstimate.totalUSD.toLocaleString() : '0')}
+                      </div>
+                    )}
                     <Button
                       onClick={handleCreateTask}
                       disabled={isLoading}

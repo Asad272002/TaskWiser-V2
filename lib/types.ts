@@ -56,6 +56,9 @@ export interface Task {
   updatedAt?: string
   // Add tags support for tasks
   tags?: string[]
+  // Estimated cost fields
+  estimatedCostUSD?: number
+  estimatedHours?: number
 }
 
 export interface TaskProposal {
