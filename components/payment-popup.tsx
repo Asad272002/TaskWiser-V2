@@ -196,12 +196,6 @@ export function PaymentPopup({
             )}
           </div>
         )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => handleDialogClose(false)}>
-            Close
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

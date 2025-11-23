@@ -187,6 +187,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   // Multiple Selection and batch processing
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectionContext, setSelectionContext] = useState<{ columnId: string; scope?: "unpaid" } | null>(null);
   const [isBatchPaymentOpen, setIsBatchPaymentOpen] = useState(false);
   const [batchPaymentTasks, setBatchPaymentTasks] = useState<Task[]>([]);
 
@@ -366,16 +367,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     updateColumnsBasedOnView();
   }, [activeView, allTasks, createdTasks, assignedTasks]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + Shift + S: Toggle selection mode
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "S") {
-        e.preventDefault();
-        setIsSelectionMode((prev) => !prev);
-      }
-
-      // Escape: Clear selection and close dialogs
       if (e.key === "Escape") {
         if (isSelectionMode) {
           clearSelection();
@@ -1845,8 +1838,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       await markTasksAsPaid(taskIds);
       setIsBatchPaymentOpen(false);
       setBatchPaymentTasks([]);
-      setSelectedTasks(new Set());
-      setIsSelectionMode(false);
+      clearSelection();
 
       toast({
         title: "Batch payment successful",
@@ -2170,8 +2162,36 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     return availableUsers.find((user) => user.address === walletAddress);
   };
 
+  const isSelectionActiveFor = (columnId: string, scope?: "unpaid") =>
+    selectionContext?.columnId === columnId && selectionContext?.scope === scope;
+
+  const toggleColumnSelectionMode = (columnId: string, scope?: "unpaid") => {
+    if (isSelectionActiveFor(columnId, scope)) {
+      clearSelection();
+      return;
+    }
+
+    setSelectedTasks(new Set());
+    setSelectionContext({ columnId, scope });
+    setIsSelectionMode(true);
+  };
+
   // Toggle individual task selection
   const toggleTaskSelection = (taskId: string, task: Task) => {
+    if (!selectionContext) {
+      return;
+    }
+
+    const matchesColumn =
+      selectionContext.columnId === "done"
+        ? task.status === "done" &&
+          (selectionContext.scope !== "unpaid" || !task.paid)
+        : task.status === selectionContext.columnId;
+
+    if (!matchesColumn) {
+      return;
+    }
+
     // Only allow selection of tasks with rewards that haven't been paid
     if (!task.reward || !task.rewardAmount || task.paid) {
       return;
@@ -2183,31 +2203,36 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     } else {
       newSelection.add(taskId);
     }
-    setSelectedTasks(newSelection);
-
-    // Auto-disable selection mode if no tasks selected
     if (newSelection.size === 0) {
-      setIsSelectionMode(false);
+      clearSelection();
+    } else {
+      setSelectedTasks(newSelection);
     }
   };
 
-  // Select all payable tasks in a column
-  const selectAllInColumn = (columnId: string) => {
+  // Select all payable tasks in a column (optionally scoped)
+  const selectAllInColumn = (columnId: string, scope?: "unpaid") => {
     const column = columns.find((col) => col.id === columnId);
     if (!column) return;
 
-    const newSelection = new Set(selectedTasks);
+    const targetSelection = isSelectionActiveFor(columnId, scope)
+      ? new Set(selectedTasks)
+      : new Set<string>();
+
     column.tasks.forEach((task) => {
       if (
         task.reward &&
         task.rewardAmount &&
         !task.paid &&
-        task.userId === account
+        task.userId === account &&
+        (scope !== "unpaid" || !task.paid)
       ) {
-        newSelection.add(task.id);
+        targetSelection.add(task.id);
       }
     });
-    setSelectedTasks(newSelection);
+
+    setSelectedTasks(targetSelection);
+    setSelectionContext({ columnId, scope });
     setIsSelectionMode(true);
   };
 
@@ -2215,6 +2240,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const clearSelection = () => {
     setSelectedTasks(new Set());
     setIsSelectionMode(false);
+    setSelectionContext(null);
   };
 
   // Get selected tasks details
@@ -2597,11 +2623,6 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                 ))
               )}
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsManageContribOpen(false)}>
-                Close
-              </Button>
-            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
@@ -2840,46 +2861,6 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <HelpCircle className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80">
-                <div className="space-y-2">
-                  <h4 className="font-medium">Keyboard Shortcuts</h4>
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Toggle Selection
-                      </span>
-                      <kbd className="px-2 py-1 bg-muted rounded">
-                        Ctrl+Shift+S
-                      </kbd>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Process Payment
-                      </span>
-                      <kbd className="px-2 py-1 bg-muted rounded">
-                        Ctrl+Shift+P
-                      </kbd>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Undo</span>
-                      <kbd className="px-2 py-1 bg-muted rounded">Ctrl+Z</kbd>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Cancel Selection
-                      </span>
-                      <kbd className="px-2 py-1 bg-muted rounded">Esc</kbd>
-                    </div>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
           </div>
         </div>
       </div>
@@ -2921,42 +2902,77 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
               isProjectView ? "h-full min-h-0" : ""
             }`}
           >
-            {columns.map((column) => (
-              <div
-                key={column.id}
-                className={`kanban-column kanban-column-todo bg-white/80 dark:bg-[#1e1e1e] rounded-lg p-4 shadow-md flex flex-col ${
-                  isProjectView ? "h-full min-h-0" : ""
-                }`}
-              >
-                <div className="mb-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {column.icon}
-                    <h2 className="font-semibold">
-                      {column.title} ({column.count})
-                    </h2>
+            {columns.map((column) => {
+              const isStandardColumn = ["todo", "inprogress", "review"].includes(column.id);
+              const columnSelectionActive = isStandardColumn
+                ? isSelectionActiveFor(column.id)
+                : false;
+              const isUnpaidSelectionActive =
+                column.id === "done" ? isSelectionActiveFor("done", "unpaid") : false;
+              const showSelectAllButton = column.id === "done" && isUnpaidSelectionActive;
+
+              return (
+                <div
+                  key={column.id}
+                  className={`kanban-column kanban-column-todo bg-white/80 dark:bg-[#1e1e1e] rounded-lg p-4 shadow-md flex flex-col ${
+                    isProjectView ? "h-full min-h-0" : ""
+                  }`}
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {column.icon}
+                      <h2 className="font-semibold">
+                        {column.title} ({column.count})
+                      </h2>
+                    </div>
+
+                    {(isStandardColumn || showSelectAllButton) && (
+                      <div className="flex items-center gap-2">
+                        {isStandardColumn && (
+                          <button
+                            type="button"
+                            aria-pressed={columnSelectionActive}
+                            onClick={() => toggleColumnSelectionMode(column.id)}
+                            className={`h-7 w-7 rounded-full border flex items-center justify-center transition text-muted-foreground ${
+                              columnSelectionActive
+                                ? "border-purple-500 text-purple-600 bg-purple-50 dark:bg-purple-500/20"
+                                : "border-muted-foreground/30 hover:border-purple-400 hover:text-purple-500"
+                            }`}
+                            title={
+                              columnSelectionActive
+                                ? "Disable multi-select for this column"
+                                : "Enable multi-select for this column"
+                            }
+                          >
+                            {columnSelectionActive ? (
+                              <CheckSquare className="h-4 w-4" />
+                            ) : (
+                              <Square className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
+                        {showSelectAllButton && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => selectAllInColumn(column.id, "unpaid")}
+                            className="text-xs h-7 px-2"
+                          >
+                            Select All
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Add Select All button for Done column */}
-                  {isSelectionMode && column.id === "done" && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => selectAllInColumn(column.id)}
-                      className="text-xs h-7 px-2"
-                    >
-                      Select All
-                    </Button>
-                  )}
-                </div>
-
-                <Droppable droppableId={column.id}>
-                  {(provided) => (
-                    <div
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                      className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-2 -mr-2"
-                      style={{ minHeight: 0 }}
-                    >
+                  <Droppable droppableId={column.id}>
+                    {(provided) => (
+                      <div
+                        {...provided.droppableProps}
+                        ref={provided.innerRef}
+                        className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-2 -mr-2"
+                        style={{ minHeight: 0 }}
+                      >
                       {/* Render grouped tasks for Done column, regular tasks for others */}
                       {column.id === "done" ? (
                         (() => {
@@ -2986,11 +3002,34 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                               {/* Unpaid Tasks Group */}
                               {unpaid.length > 0 && (
                                 <div className="space-y-3">
-                                  <div className="sticky top-0 z-10 flex items-center gap-2 px-2 py-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 rounded-lg border-l-4 border-amber-500 dark:border-amber-400">
-                                    <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                                    <h3 className="font-semibold text-sm text-amber-900 dark:text-amber-300">
-                                      Unpaid ({unpaid.length})
-                                    </h3>
+                                  <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-2 py-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/30 dark:to-orange-900/30 rounded-lg border-l-4 border-amber-500 dark:border-amber-400">
+                                    <div className="flex items-center gap-2">
+                                      <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                                      <h3 className="font-semibold text-sm text-amber-900 dark:text-amber-300">
+                                        Unpaid ({unpaid.length})
+                                      </h3>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      aria-pressed={isUnpaidSelectionActive}
+                                      onClick={() => toggleColumnSelectionMode("done", "unpaid")}
+                                      className={`h-7 w-7 rounded-full border flex items-center justify-center transition text-amber-700 dark:text-amber-200 ${
+                                        isUnpaidSelectionActive
+                                          ? "border-purple-500 text-purple-600 bg-purple-50 dark:bg-purple-500/20"
+                                          : "border-amber-300/70 hover:border-purple-400 hover:text-purple-500"
+                                      }`}
+                                      title={
+                                        isUnpaidSelectionActive
+                                          ? "Disable multi-select for unpaid tasks"
+                                          : "Enable multi-select for unpaid tasks"
+                                      }
+                                    >
+                                      {isUnpaidSelectionActive ? (
+                                        <CheckSquare className="h-4 w-4" />
+                                      ) : (
+                                        <Square className="h-4 w-4" />
+                                      )}
+                                    </button>
                                   </div>
                                   <div className="space-y-3">
                                     {unpaid.map((task, index) => {
@@ -3005,14 +3044,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                           {(provided, snapshot) => (
                                             <TaskCard
                                               task={task}
-                                              isSelectionMode={isSelectionMode}
+                                              isSelectionMode={isUnpaidSelectionActive}
                                               isSelected={selectedTasks.has(task.id)}
                                               selectedCount={selectedTasks.size}
                                               currentUserId={currentUserId}
                                               account={account}
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (isSelectionMode) {
+                                                if (isUnpaidSelectionActive) {
                                                   toggleTaskSelection(task.id, task);
                                                 } else {
                                                   handleTaskClick(task);
@@ -3052,18 +3091,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                           {(provided, snapshot) => (
                                             <TaskCard
                                               task={task}
-                                              isSelectionMode={isSelectionMode}
+                                              isSelectionMode={false}
                                               isSelected={selectedTasks.has(task.id)}
                                               selectedCount={selectedTasks.size}
                                               currentUserId={currentUserId}
                                               account={account}
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (isSelectionMode) {
-                                                  toggleTaskSelection(task.id, task);
-                                                } else {
-                                                  handleTaskClick(task);
-                                                }
+                                                handleTaskClick(task);
                                               }}
                                               isDragging={snapshot.isDragging}
                                               provided={provided}
@@ -3111,14 +3146,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                             {(provided, snapshot) => (
                               <TaskCard
                                 task={task}
-                                isSelectionMode={isSelectionMode}
+                                isSelectionMode={columnSelectionActive}
                                 isSelected={selectedTasks.has(task.id)}
                                 selectedCount={selectedTasks.size}
                                 currentUserId={currentUserId}
                                 account={account}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (isSelectionMode) {
+                                  if (columnSelectionActive) {
                                     toggleTaskSelection(task.id, task);
                                   } else {
                                     handleTaskClick(task);
@@ -3137,7 +3172,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                   )}
                 </Droppable>
               </div>
-            ))}
+            );
+          })}
           </div>
         </DragDropContext>
       )}
@@ -3740,12 +3776,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                               </Button>
                             </>
                           )}
-                          <Button
-                            variant="outline"
-                            onClick={() => setIsTaskDetailOpen(false)}
-                          >
-                            Close
-                          </Button>
+                          
                         </div>
                       </div>
                     );
@@ -4153,18 +4184,6 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
               </div>
             )}
           </div>
-
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsBatchPaymentOpen(false);
-                setBatchPaymentTasks([]);
-              }}
-            >
-              Close
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

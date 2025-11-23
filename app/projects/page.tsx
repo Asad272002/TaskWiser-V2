@@ -673,13 +673,6 @@ export default function ProjectsPage() {
                         >
                           <DropdownMenuItem 
                             className="dark:hover:bg-gray-700"
-                            onClick={(e) => handleViewDetails(project, e)}
-                          >
-                            <Eye className="mr-2 h-4 w-4" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            className="dark:hover:bg-gray-700"
                             onClick={(e) => handleEditProject(project, e)}
                           >
                             <Edit className="mr-2 h-4 w-4" />
@@ -801,30 +794,6 @@ export default function ProjectsPage() {
             </DialogHeader>
             
             <div className="space-y-6 py-4">
-              {/* Add New Member Section */}
-              {selectedProject && isAdmin(selectedProject) && (
-                <div className="space-y-3 p-4 border rounded-lg dark:border-gray-700">
-                  <div className="flex items-center gap-2">
-                    <UserPlus className="h-4 w-4" />
-                    <h3 className="font-semibold">Add New Member</h3>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Enter wallet address (0x...)"
-                      value={newMemberAddress}
-                      onChange={(e) => setNewMemberAddress(e.target.value)}
-                      className="dark-input flex-1"
-                    />
-                    <Button onClick={handleAddMember} className="gradient-button">
-                      Add
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    New members will be added as Contributors by default
-                  </p>
-                </div>
-              )}
-
               {/* Invite Registered Profiles */}
               {selectedProject && isAdmin(selectedProject) && (
                 <div className="space-y-3 p-4 border rounded-lg dark:border-gray-700">

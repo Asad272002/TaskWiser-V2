@@ -4,6 +4,9 @@ export interface UserProfile {
   id: string
   address: string
   username: string
+  displayName?: string
+  discordUsername?: string
+  email?: string
   profilePicture: string
   createdAt: string
   updatedAt: string

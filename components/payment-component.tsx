@@ -39,16 +39,25 @@ const TOKEN_METADATA: Record<
   { address: string; decimals: number; label: string }
 > = {
   USDC: {
-    address: "0x07865c6E87B9F70255377e024ace6630C1Eaa37F",
+    address: "0x427B7203ECCD442eB0a293C3a96c5A85C6476203",
     decimals: 6,
     label: "USD Coin (Sepolia)",
   },
   USDT: {
-    address: "0x509Ee0d083DdF8AC028f2a56731412eE0E26B45E",
+    address: "0xA0DF73C3AEBc134c1737E407f8C9a21FeEd87Dfd",
     decimals: 6,
     label: "Tether USD (Sepolia)",
   },
 };
+const BATCH_PAYMENT_CONTRACT_ADDRESS =
+  "0xcCA928f3951808aF1f6A22CC772571F1185BD40F";
+const ERC20_ALLOWANCE_ABI = [
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+];
+const TASK_WISER_BATCH_ABI = [
+  "function batchPay(address token, address payer, address[] recipients, uint256[] amounts) external",
+];
 const ERC20_INTERFACE = new ethers.Interface([
   "function transfer(address recipient, uint256 amount)",
 ]);
@@ -393,26 +402,7 @@ export function PaymentComponent({
     return txHash as string;
   };
 
-  const handlePay = async () => {
-    if (!ensureProvider()) {
-      return;
-    }
-    if (!isConnected || !currentAccount) {
-      setError("Connect your wallet first.");
-      return;
-    }
-    if (!isCorrectNetwork) {
-      setError("Switch to Sepolia to continue.");
-      return;
-    }
-    if (!validateTargets()) {
-      return;
-    }
-
-    setIsPaying(true);
-    setSuccessHashes([]);
-    setProgress((prev) => ({ ...prev, current: 0, message: "Starting payouts" }));
-
+  const executeSerialPayments = async () => {
     const txHashes: string[] = [];
     let lastTarget: { address: string; amount: number } | null = null;
 
@@ -474,6 +464,176 @@ export function PaymentComponent({
         variant: "destructive",
       });
       onError?.(txError);
+      throw txError;
+    }
+  };
+
+  const executeBatchPayment = async () => {
+    if (!provider || !currentAccount) {
+      throw new Error("Wallet not connected.");
+    }
+
+    const token = TOKEN_METADATA[selectedToken];
+    const recipients = payoutTargets.map((target) => target.address);
+    const amountsAtomic = payoutTargets.map((target) =>
+      ethers.parseUnits(target.amount.toString(), token.decimals)
+    );
+    const totalAmount = payoutTargets.reduce(
+      (acc, target) => acc + Number(target.amount || 0),
+      0
+    );
+    const totalAtomic = ethers.parseUnits(
+      totalAmount.toFixed(token.decimals),
+      token.decimals
+    );
+
+    const initialStatuses: Record<string, PayoutStatus> = {};
+    payoutTargets.forEach((target) => {
+      initialStatuses[target.address.toLowerCase()] = {
+        status: "pending",
+        message: "Preparing batch payment",
+      };
+    });
+    setPayoutStatuses(initialStatuses);
+    setProgress({ current: 0, total: 1, message: "Preparing batch payment" });
+
+    try {
+      const browserProvider = new ethers.BrowserProvider(provider);
+      const signer = await browserProvider.getSigner();
+      const tokenContract = new ethers.Contract(
+        token.address,
+        ERC20_ALLOWANCE_ABI,
+        signer
+      );
+      const allowance: bigint = await tokenContract.allowance(
+        currentAccount,
+        BATCH_PAYMENT_CONTRACT_ADDRESS
+      );
+
+      if (allowance < totalAtomic) {
+        setProgress({
+          current: 0,
+          total: 1,
+          message: "Approving token allowance",
+        });
+        const approveTx = await tokenContract.approve(
+          BATCH_PAYMENT_CONTRACT_ADDRESS,
+          totalAtomic
+        );
+        await approveTx.wait();
+        toast({
+          title: "Allowance approved",
+          description: "Token allowance updated for batch payouts.",
+        });
+      }
+
+      setProgress({
+        current: 0,
+        total: 1,
+        message: "Submitting batch transaction",
+      });
+
+      const batchContract = new ethers.Contract(
+        BATCH_PAYMENT_CONTRACT_ADDRESS,
+        TASK_WISER_BATCH_ABI,
+        signer
+      );
+      const tx = await batchContract.batchPay(
+        token.address,
+        currentAccount,
+        recipients,
+        amountsAtomic
+      );
+
+      setProgress({
+        current: 0,
+        total: 1,
+        message: "Awaiting confirmation",
+      });
+      const receipt = await tx.wait();
+      const hash = receipt?.hash ?? tx.hash;
+
+      setSuccessHashes([hash]);
+      setProgress({
+        current: 1,
+        total: 1,
+        message: "Batch payment confirmed",
+      });
+      setPayoutStatuses((prev) => {
+        const next = { ...prev };
+        payoutTargets.forEach((target) => {
+          next[target.address.toLowerCase()] = {
+            status: "success",
+            hash,
+            message: "Included in batch transaction",
+          };
+        });
+        return next;
+      });
+      toast({
+        title: "Batch payment sent",
+        description: `Tx ${shortenAddress(hash)} confirmed`,
+      });
+      onSuccess?.([hash]);
+    } catch (batchError: any) {
+      const formatted = formatProviderError(batchError);
+      setError(formatted);
+      setProgress((prev) => ({
+        ...prev,
+        message: "Batch payment failed",
+      }));
+      setPayoutStatuses((prev) => {
+        const next = { ...prev };
+        payoutTargets.forEach((target) => {
+          next[target.address.toLowerCase()] = {
+            status: "error",
+            message: formatted,
+          };
+        });
+        return next;
+      });
+      toast({
+        title: "Batch payment failed",
+        description: formatted,
+        variant: "destructive",
+      });
+      onError?.(batchError);
+      throw batchError;
+    }
+  };
+
+  const handlePay = async () => {
+    if (!ensureProvider()) {
+      return;
+    }
+    if (!isConnected || !currentAccount) {
+      setError("Connect your wallet first.");
+      return;
+    }
+    if (!isCorrectNetwork) {
+      setError("Switch to Sepolia to continue.");
+      return;
+    }
+    if (!validateTargets()) {
+      return;
+    }
+
+    setIsPaying(true);
+    setSuccessHashes([]);
+    setProgress((prev) => ({
+      ...prev,
+      current: 0,
+      message: mode === "batch" ? "Preparing batch payment" : "Starting payouts",
+    }));
+
+    try {
+      if (mode === "batch") {
+        await executeBatchPayment();
+      } else {
+        await executeSerialPayments();
+      }
+    } catch (err) {
+      // errors handled inside respective executors
     } finally {
       setIsPaying(false);
     }
