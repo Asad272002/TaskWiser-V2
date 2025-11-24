@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
     const user = `Task details:\nTitle: ${title}\nDescription: ${description}\nTags: ${Array.isArray(tags) ? tags.join(", ") : ""}\nPriority: ${priority ?? "normal"}\n\nBaseline heuristic (for guidance only, feel free to refine): ${JSON.stringify(baseline)}\n\nReturn JSON only.`;
 
     const completion = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      model: process.env.OPENAI_MODEL || "gemini-2.5-flash",
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

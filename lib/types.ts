@@ -11,6 +11,7 @@ export interface UserProfile {
   createdAt: string
   updatedAt: string
   specialties?: string[]
+  ownerUid?: string
 }
 
 export interface Task {
@@ -22,8 +23,11 @@ export interface Task {
   reward?: string
   rewardAmount?: number
   userId: string
+  userUid?: string
   assigneeId?: string
+  assigneeUid?: string | null
   reviewerId?: string
+  reviewerUid?: string | null
   projectId?: string
   category?: string
   assignee?: {
@@ -89,7 +93,10 @@ export interface Project {
   description: string
   status: "active" | "completed" | "archived"
   createdBy: string
+  createdByUid?: string
   members?: ProjectMember[] | null
+  memberIds?: string[]
+  memberRoleMap?: Record<string, "admin" | "manager" | "contributor">
   createdAt: string
   updatedAt?: string
   dueDate?: string
@@ -101,10 +108,12 @@ export interface Project {
 
 export interface ProjectMember {
   userId: string
+  userUid?: string
   role: "admin" | "manager" | "contributor"
   joinedAt: string
   invitedBy?: string
   isActive: boolean
+  address?: string
 }
 
 export interface EventLogs {
