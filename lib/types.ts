@@ -30,6 +30,7 @@ export interface Task {
   reviewerUid?: string | null
   projectId?: string
   category?: string
+  tags?: string[]
   assignee?: {
     id: string
     username: string

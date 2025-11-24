@@ -245,7 +245,9 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const [contributorStats, setContributorStats] = useState<Array<{
     user: UserProfile,
     tasksCompleted: number,
+    totalAssigned: number,
     tagCompleted: number,
+    tagTotal: number,
     avgCompletionMs: number | null,
     isMember: boolean,
   }>>([]);
@@ -1497,33 +1499,42 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         reviewer = undefined;
       }
 
+      // Normalize FieldValue to undefined for Task object (FieldValue is only for Firestore updates)
+      const normalizedReward = editedTask.reward === "no_reward" ? undefined : editedTask.reward;
+      const normalizedEscrowStatus = (typeof editedTask.escrowEnabled === "boolean"
+        ? editedTask.escrowEnabled
+        : selectedTask.escrowEnabled)
+        ? (selectedTask.escrowStatus || "locked")
+        : undefined;
+
       const updatedTask: Task = {
         ...selectedTask,
         ...editedTask,
-        reward: updatedTaskData.reward,
+        reward: normalizedReward,
         assignee,
         reviewer,
         isOpenBounty: updatedTaskData.isOpenBounty,
         escrowEnabled: updatedTaskData.escrowEnabled,
-        escrowStatus: updatedTaskData.escrowStatus,
+        escrowStatus: normalizedEscrowStatus,
         updatedAt: timestamp,
       };
 
       // Auto-invite edited assignee if not already a member
+      const newAssigneeId = editedTask.assigneeId;
       if (
         currentProject &&
         !isOpenBountyEffective &&
-        editedTask.assigneeId &&
-        editedTask.assigneeId !== selectedTask.assigneeId
+        newAssigneeId &&
+        newAssigneeId !== selectedTask.assigneeId
       ) {
         const isMember = !!currentProject.members?.some(
-          (m) => m.userId === editedTask.assigneeId
+          (m) => m.userId === newAssigneeId
         );
-        if (!isMember) {
+        if (!isMember && account) {
           try {
             await inviteUserToProject(
               currentProject.id,
-              editedTask.assigneeId,
+              newAssigneeId,
               account,
               currentProject.title
             );
@@ -1795,7 +1806,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       });
 
       // Auto-invite newly assigned user if they arenΓÇÖt a project member
-      if (currentProject) {
+      if (currentProject && account) {
         const isMember = !!currentProject.members?.some(
           (m) => m.userId === assigneeData.id
         );
@@ -2957,7 +2968,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                             <div key={s.user.id || idx} className="space-y-3 rounded-xl border shadow-sm backdrop-blur-sm bg-white/80 dark:bg-[#1e1e1e]/70 overflow-hidden p-3 md:p-4">
                               <div className="flex items-center gap-3">
                                 <Avatar className="h-8 w-8">
-                                  <AvatarImage src={s.user.avatarUrl || undefined} />
+                                  <AvatarImage src={s.user.profilePicture || undefined} />
                                   <AvatarFallback>{name.slice(0,1).toUpperCase()}</AvatarFallback>
                                 </Avatar>
                                 <div>
@@ -2995,8 +3006,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                   ) : (
                                     <Button size="sm" variant="secondary" className="h-7 px-2 text-xs" onClick={async () => {
                                       try {
-                                        if (!currentProject || !s.user.address) return;
-                                        await inviteUserToProject(currentProject.id, s.user.address);
+                                        if (!currentProject || !s.user.address || !account) return;
+                                        await inviteUserToProject(currentProject.id, s.user.id, account, currentProject.title);
                                         toast({ title: "Invitation sent" });
                                       } catch (e) {
                                         toast({ title: "Failed to send invite", variant: "destructive" });
