@@ -78,6 +78,25 @@ export function RewardInput({
   onAmountChange,
   label = "BOUNTY",
 }: RewardInputProps) {
+  const handleAmountChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const rawValue = event.target.value;
+    if (!rawValue.trim()) {
+      onAmountChange(undefined);
+      return;
+    }
+
+    const parsed = Number.parseFloat(rawValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      onAmountChange(undefined);
+      return;
+    }
+
+    const normalized = Math.abs(parsed);
+    onAmountChange(normalized);
+  };
+
   return (
     <div className="space-y-2">
       <Label className="text-xs font-semibold uppercase text-muted-foreground">
@@ -100,12 +119,11 @@ export function RewardInput({
         </Select>
         <Input
           type="number"
-          value={rewardAmount || ""}
-          onChange={(e) =>
-            onAmountChange(
-              e.target.value ? Number.parseFloat(e.target.value) : undefined
-            )
-          }
+          min="0.01"
+          step="0.01"
+          inputMode="decimal"
+          value={rewardAmount ? String(rewardAmount) : ""}
+          onChange={handleAmountChange}
           placeholder="Amount"
         />
       </div>
@@ -114,6 +132,22 @@ export function RewardInput({
 }
 
 export function TaskPointsInput() {
+  const handleInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = event.target.value;
+    if (!rawValue.trim()) {
+      event.target.value = "";
+      return;
+    }
+
+    const parsed = Number.parseFloat(rawValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      event.target.value = "";
+      return;
+    }
+
+    event.target.value = Math.max(0, Math.abs(parsed)).toString();
+  };
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -122,7 +156,16 @@ export function TaskPointsInput() {
         </Label>
         <HelpCircle className="h-4 w-4 text-muted-foreground" />
       </div>
-      <Input placeholder="Estimate task effort" type="number" className="w-full" />
+      <Input
+        placeholder="Estimate task effort"
+        type="number"
+        min="1"
+        step="1"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        onChange={handleInput}
+        className="w-full"
+      />
     </div>
   );
 }

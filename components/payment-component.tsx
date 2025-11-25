@@ -53,6 +53,7 @@ const BATCH_PAYMENT_CONTRACT_ADDRESS =
   "0xcCA928f3951808aF1f6A22CC772571F1185BD40F";
 const ERC20_ALLOWANCE_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)",
+  "function balanceOf(address owner) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
 ];
 const TASK_WISER_BATCH_ABI = [
@@ -62,6 +63,7 @@ const ERC20_INTERFACE = new ethers.Interface([
   "function transfer(address recipient, uint256 amount)",
 ]);
 const ALL_SUPPORTED_TOKENS = Object.keys(TOKEN_METADATA) as SupportedToken[];
+const MIN_GAS_BUFFER_WEI = ethers.parseUnits("0.00005", "ether");
 
 type MetaMaskProvider = Eip1193Provider & {
   isMetaMask?: boolean;
@@ -131,6 +133,11 @@ export function PaymentComponent({
     Record<string, PayoutStatus>
   >({});
   const [isMetaMaskAvailable, setIsMetaMaskAvailable] = useState(true);
+  const [walletTokenBalance, setWalletTokenBalance] = useState<bigint | null>(null);
+  const [walletEthBalance, setWalletEthBalance] = useState<bigint | null>(null);
+  const [estimatedGasFeeWei, setEstimatedGasFeeWei] = useState<bigint | null>(null);
+  const [isCheckingBalances, setIsCheckingBalances] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
   const { toast } = useToast();
 
   const payoutTargets = useMemo(() => {
@@ -253,6 +260,135 @@ export function PaymentComponent({
     }
     return true;
   }, [provider, isMetaMaskAvailable]);
+
+  const requiredTokenAtomic = useMemo(() => {
+    const tokenMeta = TOKEN_METADATA[selectedToken];
+    if (!tokenMeta || !payoutTargets.length) {
+      return BigInt(0);
+    }
+    return payoutTargets.reduce((total, target) => {
+      const amount = target.amount ?? 0;
+      if (!amount) {
+        return total;
+      }
+      try {
+        return total + ethers.parseUnits(amount.toString(), tokenMeta.decimals);
+      } catch (error) {
+        console.warn("Failed to parse payout amount", error);
+        return total;
+      }
+    }, BigInt(0));
+  }, [payoutTargets, selectedToken]);
+
+  const formattedWalletTokenBalance = useMemo(() => {
+    const tokenMeta = TOKEN_METADATA[selectedToken];
+    if (!tokenMeta || walletTokenBalance === null) {
+      return null;
+    }
+    return ethers.formatUnits(walletTokenBalance, tokenMeta.decimals);
+  }, [walletTokenBalance, selectedToken]);
+
+  const formattedRequiredToken = useMemo(() => {
+    const tokenMeta = TOKEN_METADATA[selectedToken];
+    if (!tokenMeta) {
+      return "0";
+    }
+    return ethers.formatUnits(requiredTokenAtomic, tokenMeta.decimals);
+  }, [requiredTokenAtomic, selectedToken]);
+
+  const formattedEthBalance = useMemo(() => {
+    if (walletEthBalance === null) {
+      return null;
+    }
+    return ethers.formatEther(walletEthBalance);
+  }, [walletEthBalance]);
+
+  const formattedEstimatedGasFee = useMemo(() => {
+    if (estimatedGasFeeWei === null) {
+      return null;
+    }
+    return ethers.formatEther(estimatedGasFeeWei);
+  }, [estimatedGasFeeWei]);
+
+  const requiresTokenBalanceCheck = requiredTokenAtomic > BigInt(0);
+  const requiresGasBalanceCheck = payoutTargets.length > 0;
+
+  const hasSufficientTokenBalance =
+    !requiresTokenBalanceCheck ||
+    (walletTokenBalance !== null && walletTokenBalance >= requiredTokenAtomic);
+  const hasSufficientGasBalance =
+    !requiresGasBalanceCheck ||
+    (walletEthBalance !== null &&
+      estimatedGasFeeWei !== null &&
+      walletEthBalance >= estimatedGasFeeWei);
+
+  useEffect(() => {
+    if (!provider || !currentAccount || !TOKEN_METADATA[selectedToken]) {
+      setWalletTokenBalance(null);
+      setWalletEthBalance(null);
+      setEstimatedGasFeeWei(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshBalances = async () => {
+      setIsCheckingBalances(true);
+      try {
+        const browserProvider = new ethers.BrowserProvider(provider);
+        const tokenMeta = TOKEN_METADATA[selectedToken];
+
+        const tokenContract = new ethers.Contract(
+          tokenMeta.address,
+          ERC20_ALLOWANCE_ABI,
+          browserProvider
+        );
+
+        const [ethBalance, tokenBalanceRaw, feeData] = await Promise.all([
+          browserProvider.getBalance(currentAccount),
+          tokenContract.balanceOf(currentAccount),
+          browserProvider.getFeeData(),
+        ]);
+
+        const gasPrice =
+          feeData.maxFeePerGas ??
+          feeData.gasPrice ??
+          ethers.parseUnits("20", "gwei");
+      const payoutCount = BigInt(Math.max(1, payoutTargets.length || 1));
+      const baseGasUnits =
+        mode === "batch"
+          ? BigInt(320000) + BigInt(80000) * payoutCount
+          : BigInt(120000) * payoutCount;
+        const estimatedFee = gasPrice * baseGasUnits + MIN_GAS_BUFFER_WEI;
+
+        if (!cancelled) {
+          setWalletEthBalance(ethBalance);
+          setWalletTokenBalance(tokenBalanceRaw);
+          setEstimatedGasFeeWei(estimatedFee);
+          setBalanceError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to refresh wallet balances:", error);
+          setBalanceError(
+            error instanceof Error
+              ? error.message
+              : "Unable to read wallet balances."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsCheckingBalances(false);
+        }
+      }
+    };
+
+    void refreshBalances();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, currentAccount, selectedToken, payoutTargets, mode]);
 
   const connectWallet = async () => {
     if (!ensureProvider()) {
@@ -617,6 +753,26 @@ export function PaymentComponent({
     if (!validateTargets()) {
       return;
     }
+    if (!hasSufficientTokenBalance) {
+      const message = `Insufficient ${selectedToken} balance to cover payouts.`;
+      setError(message);
+      toast({
+        title: "Not enough tokens",
+        description: message,
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!hasSufficientGasBalance) {
+      const message = "Not enough ETH to cover the estimated gas fees.";
+      setError(message);
+      toast({
+        title: "Insufficient gas",
+        description: message,
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsPaying(true);
     setSuccessHashes([]);
@@ -643,7 +799,10 @@ export function PaymentComponent({
     isConnected &&
     isCorrectNetwork &&
     payoutTargets.length > 0 &&
-    !isPaying;
+    !isPaying &&
+    !isCheckingBalances &&
+    hasSufficientTokenBalance &&
+    hasSufficientGasBalance;
 
   const renderPayoutStatus = (target: { address: string; amount: number }) => {
     const status = payoutStatuses[target.address.toLowerCase()];
@@ -804,6 +963,65 @@ export function PaymentComponent({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
+
+        {balanceError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Balance check failed</AlertTitle>
+            <AlertDescription>{balanceError}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border p-3 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span>Wallet {selectedToken} balance</span>
+              <span>
+                {formattedWalletTokenBalance
+                  ? `${formattedWalletTokenBalance} ${selectedToken}`
+                  : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span>Required for payout</span>
+              <span>
+                {formattedRequiredToken} {selectedToken}
+              </span>
+            </div>
+            {isCheckingBalances && (
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Checking balances…
+              </p>
+            )}
+            {!hasSufficientTokenBalance && requiresTokenBalanceCheck && (
+              <p className="text-xs text-destructive">
+                Insufficient {selectedToken} balance for the selected payouts.
+              </p>
+            )}
+          </div>
+          <div className="rounded-lg border p-3 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span>Wallet ETH balance</span>
+              <span>
+                {formattedEthBalance ? `${formattedEthBalance} ETH` : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span>Estimated gas needed</span>
+              <span>
+                {formattedEstimatedGasFee
+                  ? `${formattedEstimatedGasFee} ETH`
+                  : "—"}
+              </span>
+            </div>
+            {!hasSufficientGasBalance && requiresGasBalanceCheck && (
+              <p className="text-xs text-destructive">
+                Add more ETH to cover the estimated gas fees.
+              </p>
+            )}
+          </div>
+        </div>
 
         {successHashes.length > 0 && (
           <div className="space-y-2">

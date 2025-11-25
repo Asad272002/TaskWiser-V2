@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { useWeb3 } from "./web3-provider";
 import { useFirebase } from "./firebase-provider";
@@ -10,6 +10,39 @@ import type { UserProfile } from "@/lib/types";
 import { usePathname } from "next/navigation";
 import { signInWithCustomToken, signOut } from "firebase/auth";
 import { useToast } from "@/components/ui/use-toast";
+
+const PROFILE_CACHE_PREFIX = "wallet-profile:";
+
+const getProfileCacheKey = (address: string) =>
+  `${PROFILE_CACHE_PREFIX}${address.toLowerCase()}`;
+
+const readCachedProfile = (address: string): UserProfile | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(getProfileCacheKey(address));
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch (error) {
+    console.warn("Failed to parse cached wallet profile, clearing cache.", error);
+    window.sessionStorage.removeItem(getProfileCacheKey(address));
+    return null;
+  }
+};
+
+const writeProfileCache = (address: string, profile: UserProfile | null) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const key = getProfileCacheKey(address);
+  if (profile) {
+    window.sessionStorage.setItem(key, JSON.stringify(profile));
+  } else {
+    window.sessionStorage.removeItem(key);
+  }
+};
 
 export function WalletConnect() {
   const {
@@ -21,11 +54,19 @@ export function WalletConnect() {
     signer,
   } = useWeb3();
   const { auth, getUserProfile } = useFirebase();
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
+    return account ? readCachedProfile(account) : null;
+  });
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const [isCheckingProfile, setIsCheckingProfile] = useState(false);
   const pathname = usePathname();
   const { toast } = useToast();
+  const cachedProfileUsername = useMemo(() => {
+    if (!account) {
+      return undefined;
+    }
+    return readCachedProfile(account)?.username;
+  }, [account]);
 
   // Check if we're on the landing page
   const isLandingPage = pathname === "/landing";
@@ -90,10 +131,25 @@ export function WalletConnect() {
   );
 
   useEffect(() => {
+    if (!account || !isConnected) {
+      setUserProfile(null);
+      setShowProfileSetup(false);
+      return;
+    }
+
+    const cachedProfile = readCachedProfile(account);
+    if (cachedProfile) {
+      setUserProfile((prev) => prev ?? cachedProfile);
+      setShowProfileSetup(false);
+    }
+  }, [account, isConnected]);
+
+  useEffect(() => {
     let cancelled = false;
+    const activeAddress = account?.toLowerCase();
 
     const syncProfile = async () => {
-      if (!account || !isConnected) {
+      if (!account || !isConnected || !activeAddress) {
         setUserProfile(null);
         setShowProfileSetup(false);
         return;
@@ -109,8 +165,11 @@ export function WalletConnect() {
         await ensureFirebaseAuth(account);
         const profile = await getUserProfile(account);
         if (cancelled) return;
+        if (account?.toLowerCase() !== activeAddress) return;
+
         setUserProfile(profile);
         setShowProfileSetup(!profile);
+        writeProfileCache(account, profile);
       } catch (error) {
         if (!cancelled) {
           console.error("Error syncing wallet profile:", error);
@@ -167,6 +226,9 @@ export function WalletConnect() {
     } catch (error) {
       console.error("Error signing out of Firebase auth:", error);
     } finally {
+      if (account) {
+        writeProfileCache(account, null);
+      }
       setUserProfile(null);
       setShowProfileSetup(false);
       disconnectWallet();
@@ -183,7 +245,9 @@ export function WalletConnect() {
         {isConnected && account ? (
           <div className="flex items-center gap-2">
             <div className="rounded-full bg-primary/20 px-3 py-1 text-sm text-primary">
-              {userProfile?.username || shortenAddress(account)}
+              {userProfile?.username ||
+                cachedProfileUsername ||
+                shortenAddress(account)}
             </div>
             <Button variant="outline" size="sm" onClick={handleDisconnect}>
               Disconnect
