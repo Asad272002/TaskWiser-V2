@@ -18,6 +18,7 @@ interface DAO {
   logo: string
   memberCount: number
   isMember?: boolean
+  isOwner?: boolean
 }
 
 export function TopDAOs() {
@@ -40,24 +41,34 @@ export function TopDAOs() {
     try {
       const projects: Project[] = await getProjects()
       let currentUserId: string | null = null
+      let currentWallet = account?.toLowerCase() ?? null
       if (isConnected && account) {
         try {
           const profile = await getUserProfile(account)
           currentUserId = profile?.id || null
+          currentWallet = profile?.address?.toLowerCase() || currentWallet
         } catch (e) {
           console.warn("Failed to get user profile for membership check", e)
         }
       }
       const mapped: DAO[] = (projects || []).map((p) => {
         const members = Array.isArray(p.members) ? p.members : []
-        const isMember = currentUserId ? members.some((m: any) => m.userId === currentUserId && m.isActive) : false
+        const activeMembersCount = members.filter((m: any) => m.isActive).length
+        const normalizedOwner = (p.createdBy || "").toLowerCase()
+
+        const userIsActiveMember =
+          currentUserId && members.some((m: any) => m.userId === currentUserId && m.isActive)
+
+        const userIsOwner = !!currentWallet && normalizedOwner === currentWallet
+
         return {
           id: p.id,
           name: p.title,
           description: p.description || "",
           logo: (p as any).logoUrl || (p as any).coverImage || "/placeholder.svg",
-          memberCount: members.filter((m: any) => m.isActive).length,
-          isMember,
+          memberCount: activeMembersCount + 1, // include owner as a member
+          isMember: Boolean(userIsActiveMember || userIsOwner),
+          isOwner: userIsOwner,
         }
       })
       const sorted = mapped.sort((a, b) => b.memberCount - a.memberCount)
@@ -70,7 +81,14 @@ export function TopDAOs() {
     }
   }
 
-  const handleApply = async (projectId: string) => {
+  const handleApply = async (projectId: string, isOwner?: boolean) => {
+    if (isOwner) {
+      toast({
+        title: "You own this project",
+        description: "Owners already have full access to their project.",
+      })
+      return
+    }
     if (!isConnected || !account) {
       toast({ title: "Wallet Required", description: "Connect your wallet first.", variant: "destructive" })
       return
@@ -149,14 +167,20 @@ export function TopDAOs() {
                 </div>
               </CardContent>
               <CardFooter className="flex justify-end">
-                <Button
-                  size="sm"
-                  onClick={() => handleApply(dao.id)}
-                  disabled={submittingId === dao.id || dao.isMember}
-                  className="dark:bg-primary dark:hover:bg-primary/90"
-                >
-                  {dao.isMember ? "Member" : submittingId === dao.id ? "Applying..." : "Apply"}
-                </Button>
+                {dao.isOwner ? (
+                  <Button size="sm" variant="outline" disabled>
+                    Owner
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => handleApply(dao.id, dao.isOwner)}
+                    disabled={submittingId === dao.id || dao.isMember}
+                    className="dark:bg-primary dark:hover:bg-primary/90"
+                  >
+                    {dao.isMember ? "Member" : submittingId === dao.id ? "Applying..." : "Apply"}
+                  </Button>
+                )}
               </CardFooter>
             </Card>
           ))
