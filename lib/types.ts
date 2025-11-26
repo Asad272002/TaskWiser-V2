@@ -59,7 +59,7 @@ export interface Task {
   isOpenBounty?: boolean
   proposals?: TaskProposal[]
   escrowEnabled?: boolean
-  escrowStatus?: "locked" | "released" | "refunded"
+  escrowStatus?: "pending" | "locked" | "released" | "refunded"
   createdAt: string
   updatedAt?: string
 }

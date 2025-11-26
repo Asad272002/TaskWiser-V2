@@ -82,6 +82,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { PaymentPopup } from "./payment-popup";
 import { PaymentComponent, type SupportedToken } from "./payment-component";
+import { EscrowPopup } from "./escrow-popup";
+import { lockEscrow } from "@/lib/escrow-contract";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
 import { deleteField } from "firebase/firestore";
@@ -114,7 +116,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     respondToProjectJoinRequest,
     inviteUserToProject,
   } = useFirebase();
-  const { account } = useWeb3();
+  const { account, signer } = useWeb3();
   const { toast } = useToast();
   const [columns, setColumns] = useState<Column[]>([
     {
@@ -234,7 +236,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const [assignedTasks, setAssignedTasks] = useState<Task[]>([]);
   const [showRewardSection, setShowRewardSection] = useState(false);
   const [showAssigneeSection, setShowAssigneeSection] = useState(false);
-  const [showAnalysisPanel, setShowAnalysisPanel] = useState(true);
+  const [showAnalysisPanel, setShowAnalysisPanel] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [isProjectMember, setIsProjectMember] = useState(false);
   const [userProjectRole, setUserProjectRole] = useState<"admin" | "manager" | "contributor" | null>(null);
@@ -253,6 +255,11 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   // New states for payment popup
   const [isPaymentPopupOpen, setIsPaymentPopupOpen] = useState(false);
   const [taskToPay, setTaskToPay] = useState<Task | null>(null);
+  // Escrow popup states
+  const [isEscrowPopupOpen, setIsEscrowPopupOpen] = useState(false);
+  const [escrowTask, setEscrowTask] = useState<Task | null>(null);
+  const [escrowMode, setEscrowMode] = useState<"lock" | "release">("lock");
+  const [isLockingEscrow, setIsLockingEscrow] = useState(false);
   const [isProposalDialogOpen, setIsProposalDialogOpen] = useState(false);
   const [proposalTargetTask, setProposalTargetTask] = useState<Task | null>(null);
   const [proposalContent, setProposalContent] = useState("");
@@ -434,10 +441,11 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         }
       })();
 
-      // Compute contributor analysis when data changes
-      // This effect depends on tags later; here we just seed once when dialog opens
+      // Initialize analysis tag from task tags
       const tags = newTask.tags || [];
-      setAnalysisTag(tags.length > 0 ? tags[0] : null);
+      if (tags.length > 0) {
+        setAnalysisTag(tags[0]);
+      }
       
       // Set up real-time listeners
       const unsubscribe = setupRealtimeListeners();
@@ -467,6 +475,84 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       });
     }
   }, [selectedTask, isEditMode]);
+
+  // Update analysis tag when task tags change
+  useEffect(() => {
+    const tags = newTask.tags || [];
+    if (tags.length > 0 && tags[0] !== analysisTag) {
+      setAnalysisTag(tags[0]);
+    } else if (tags.length === 0 && analysisTag) {
+      setAnalysisTag(null);
+    }
+  }, [newTask.tags]);
+
+  // Compute contributor analysis when dialog opens or data changes
+  useEffect(() => {
+    if (!isDialogOpen || !availableUsers.length || !allTasks.length) {
+      setContributorStats([]);
+      return;
+    }
+
+    const targetTag = analysisTag || (newTask.tags && newTask.tags.length > 0 ? newTask.tags[0] : null);
+    
+    const stats = availableUsers.map((user) => {
+      // Count all tasks assigned to this user
+      const userTasks = allTasks.filter(
+        (task) => task.assigneeId === user.id || task.assigneeId === user.address
+      );
+      const completedTasks = userTasks.filter((task) => task.status === "done");
+      
+      // Count tasks with the specific tag
+      const tagTasks = targetTag
+        ? userTasks.filter((task) => task.tags?.includes(targetTag))
+        : [];
+      const tagCompletedTasks = targetTag
+        ? tagTasks.filter((task) => task.status === "done")
+        : [];
+      
+      // Calculate average completion time
+      const completedWithDates = completedTasks.filter(
+        (task) => task.createdAt && task.updatedAt
+      );
+      const avgCompletionMs = completedWithDates.length > 0
+        ? completedWithDates.reduce((sum, task) => {
+            const created = new Date(task.createdAt!).getTime();
+            const updated = new Date(task.updatedAt!).getTime();
+            return sum + (updated - created);
+          }, 0) / completedWithDates.length
+        : null;
+
+      // Check if user is a project member
+      const isMember = currentProject
+        ? !!currentProject.members?.some((m: any) => m.userId === user.id && m.isActive)
+        : true;
+
+      return {
+        user,
+        tasksCompleted: completedTasks.length,
+        totalAssigned: userTasks.length,
+        tagCompleted: tagCompletedTasks.length,
+        tagTotal: tagTasks.length,
+        avgCompletionMs,
+        isMember,
+      };
+    });
+
+    // Sort by completion rate (for the selected tag if applicable), then by total completed
+    const sorted = stats.sort((a, b) => {
+      const aRate = targetTag && a.tagTotal > 0 ? a.tagCompleted / a.tagTotal : a.totalAssigned > 0 ? a.tasksCompleted / a.totalAssigned : 0;
+      const bRate = targetTag && b.tagTotal > 0 ? b.tagCompleted / b.tagTotal : b.totalAssigned > 0 ? b.tasksCompleted / b.totalAssigned : 0;
+      
+      if (bRate !== aRate) return bRate - aRate;
+      return b.tasksCompleted - a.tasksCompleted;
+    });
+
+    setContributorStats(sorted);
+    
+    // Set recommended contributor (top performer with availability)
+    const recommended = sorted.find((s) => s.totalAssigned > 0 && s.isMember);
+    setRecommendedContributor(recommended?.user || null);
+  }, [isDialogOpen, availableUsers, allTasks, analysisTag, newTask.tags, currentProject]);
 
   // Update columns whenever the active view or tasks change
   useEffect(() => {
@@ -1216,6 +1302,44 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       return;
     }
 
+    // Escrow validation
+    if (newTask.escrowEnabled) {
+      // Only admin can create escrow tasks
+      if (projectId && userProjectRole !== "admin") {
+        toast({
+          title: "Permission denied",
+          description: "Only project admins can create escrow-enabled tasks",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Escrow requires reward and assignee (or open bounty)
+      if (!newTask.reward || !newTask.rewardAmount || newTask.rewardAmount <= 0) {
+        toast({
+          title: "Escrow requires reward",
+          description: "Please provide a reward amount when escrow is enabled",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // If not open bounty, assignee is required for escrow
+      if (!newTask.isOpenBounty && !newTask.assigneeId) {
+        toast({
+          title: "Escrow requires assignee",
+          description: "Please assign a contributor or enable open bounty when escrow is enabled",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // For open bounty with escrow, escrow will be locked when proposal is approved
+      // For direct assignment with escrow, we need to lock before creating task
+      // But we need task ID first, so we'll create task then lock escrow
+      // Actually, let's create task first, then show escrow popup if needed
+    }
+
     setIsCreatingTask(true);
 
     try {
@@ -1259,7 +1383,13 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         taskToCreate.projectId = projectId;
       }
       if (newTask.escrowEnabled) {
-        taskToCreate.escrowStatus = "locked";
+        // For open bounty, escrow will be locked when proposal is approved
+        // For direct assignment, escrow will be locked after task creation
+        if (newTask.isOpenBounty) {
+          taskToCreate.escrowStatus = "pending"; // Will be locked when proposal approved
+        } else {
+          taskToCreate.escrowStatus = "pending"; // Will be locked via popup
+        }
       }
       if (newTask.isOpenBounty) {
         taskToCreate.proposals = [];
@@ -1331,7 +1461,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         reviewer,
       };
 
-      // Update our task lists
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       setCreatedTasks((prev) => [...prev, newTaskWithId]);
       setAllTasks((prev) => [...prev, newTaskWithId]);
 
@@ -1355,24 +1486,34 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
       // Update columns based on current view
       updateColumnsBasedOnView();
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
-      setNewTask({
-        title: "",
-        description: "",
-        status: "todo",
-        priority: "medium",
-        isOpenBounty: false,
-        escrowEnabled: false,
-        tags: [],
-      });
+      // If escrow is enabled and assignee exists (not open bounty), show escrow lock popup
+      if (newTask.escrowEnabled && !newTask.isOpenBounty && newTask.assigneeId) {
+        setEscrowTask(newTaskWithId);
+        setEscrowMode("lock");
+        setIsEscrowPopupOpen(true);
+        // Don't close dialog yet - wait for escrow to be locked
+      } else {
+        setNewTask({
+          title: "",
+          description: "",
+          status: "todo",
+          priority: "medium",
+          isOpenBounty: false,
+          escrowEnabled: false,
+          tags: [],
+        });
 
-      setIsDialogOpen(false);
-      setShowRewardSection(false);
+        setIsDialogOpen(false);
+        setShowRewardSection(false);
 
-      toast({
-        title: "Task created",
-        description: "Your task has been created successfully",
-      });
+        toast({
+          title: "Task created",
+          description: "Your task has been created successfully",
+        });
+      }
     } catch (error) {
       console.error("Error creating task:", error);
       toast({
@@ -1394,6 +1535,59 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const handleEditTask = async () => {
     if (!selectedTask || !editedTask) return;
 
+    // Prevent editing paid tasks
+    if (selectedTask.paid) {
+      toast({
+        title: "Cannot edit paid task",
+        description: "Tasks that have been paid cannot be edited",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Escrow edit restrictions
+    if (selectedTask.escrowEnabled) {
+      // Cannot remove escrow
+      if (editedTask.escrowEnabled === false) {
+        toast({
+          title: "Cannot disable escrow",
+          description: "Escrow cannot be removed from tasks that have it enabled",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Cannot change reward
+      if (editedTask.reward && editedTask.reward !== selectedTask.reward) {
+        toast({
+          title: "Cannot change reward",
+          description: "Reward token cannot be changed for escrow-enabled tasks",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Cannot change reward amount
+      if (editedTask.rewardAmount !== undefined && editedTask.rewardAmount !== selectedTask.rewardAmount) {
+        toast({
+          title: "Cannot change reward amount",
+          description: "Reward amount cannot be changed for escrow-enabled tasks",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Cannot change assignee
+      if (editedTask.assigneeId !== undefined && editedTask.assigneeId !== selectedTask.assigneeId) {
+        toast({
+          title: "Cannot change assignee",
+          description: "Assignee cannot be changed for escrow-enabled tasks",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setIsUpdatingTask(true);
 
     try {
@@ -1411,15 +1605,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         assigneeId: isOpenBountyEffective ? null : (typeof editedTask.assigneeId !== "undefined" ? editedTask.assigneeId : selectedTask.assigneeId ?? null),
         reviewerId: typeof editedTask.reviewerId !== "undefined" ? editedTask.reviewerId : (selectedTask.reviewerId ?? null),
         isOpenBounty: isOpenBountyEffective,
-        escrowEnabled:
-          typeof editedTask.escrowEnabled === "boolean"
-            ? editedTask.escrowEnabled
-            : selectedTask.escrowEnabled,
-        escrowStatus: (typeof editedTask.escrowEnabled === "boolean"
-          ? editedTask.escrowEnabled
-          : selectedTask.escrowEnabled)
-          ? (selectedTask.escrowStatus || "locked")
-          : deleteField(),
+        escrowEnabled: selectedTask.escrowEnabled, // Cannot change escrow status
+        escrowStatus: selectedTask.escrowStatus, // Cannot change escrow status
         updatedAt: timestamp,
       };
 
@@ -1511,13 +1698,16 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
       await updateTask(selectedTask.id, updatedTaskData);
 
-      // Update our task lists
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       syncTaskAcrossState(updatedTask);
       // Update columns based on current view
       updateColumnsBasedOnView();
 
       setSelectedTask(updatedTask);
       setIsEditMode(false);
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
       toast({
         title: "Task updated",
@@ -1537,6 +1727,16 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
   const handleDeleteTask = async () => {
     if (!selectedTask) return;
+
+    // Prevent deleting paid tasks
+    if (selectedTask.paid) {
+      toast({
+        title: "Cannot delete paid task",
+        description: "Tasks that have been paid cannot be deleted",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsDeletingTask(true);
 
@@ -1598,7 +1798,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         updatedAt: new Date().toISOString(),
       });
 
-      // Update our task lists
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       const updateTaskInList = (list: Task[]) =>
         list.map((task) => (task.id === updatedTask.id ? updatedTask : task));
 
@@ -1612,6 +1813,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       setSelectedTask(updatedTask);
       setIsSubmitDialogOpen(false);
       setSubmissionContent("");
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
       toast({
         title: "Work submitted",
@@ -1702,10 +1905,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         isOpenBounty: true,
       };
 
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       syncTaskAcrossState(updatedTask);
       if (selectedTask?.id === updatedTask.id) {
         setSelectedTask(updatedTask);
       }
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
       toast({
         title: "Proposal submitted",
@@ -1768,6 +1975,50 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         isOpenBounty: false,
       });
 
+      // If task has escrow enabled, lock escrow now that assignee is assigned
+      if (targetTask.escrowEnabled && targetTask.escrowStatus === "pending") {
+        // Resolve assignee address
+        let assigneeAddress: string | null = null;
+        if (assigneeProfile?.address) {
+          assigneeAddress = assigneeProfile.address;
+        } else if (ethers.isAddress(assigneeData.id)) {
+          assigneeAddress = assigneeData.id;
+        } else {
+          try {
+            const profile = await getUserProfileById(assigneeData.id);
+            assigneeAddress = profile?.address || null;
+          } catch (e) {
+            console.error("Error fetching assignee profile:", e);
+          }
+        }
+
+        if (assigneeAddress && signer && targetTask.reward && targetTask.rewardAmount) {
+          try {
+            const token = targetTask.reward as "USDC" | "USDT";
+            const tx = await lockEscrow(
+              signer,
+              taskId,
+              token,
+              assigneeAddress,
+              targetTask.rewardAmount
+            );
+            await tx.wait();
+            await updateTask(taskId, { escrowStatus: "locked" });
+            toast({
+              title: "Escrow locked",
+              description: "Tokens locked in escrow for this task",
+            });
+          } catch (error: any) {
+            console.error("Error locking escrow:", error);
+            toast({
+              title: "Failed to lock escrow",
+              description: error?.message || "Please lock escrow manually",
+              variant: "destructive",
+            });
+          }
+        }
+      }
+
       // Auto-invite newly assigned user if they arenΓÇÖt a project member
       if (currentProject && account) {
         const isMember = !!currentProject.members?.some(
@@ -1797,10 +2048,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         isOpenBounty: false,
       };
 
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       syncTaskAcrossState(updatedTask);
       if (selectedTask?.id === updatedTask.id) {
         setSelectedTask(updatedTask);
       }
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
       toast({
         title: "Proposal approved",
@@ -1837,10 +2092,14 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         proposals: updatedProposals,
       };
 
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       syncTaskAcrossState(updatedTask);
       if (selectedTask?.id === updatedTask.id) {
         setSelectedTask(updatedTask);
       }
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
       toast({
         title: "Proposal rejected",
@@ -1886,17 +2145,32 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         status: "done",
         updatedAt: new Date().toISOString(),
       });
+      
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       syncTaskAcrossState(updatedTask);
       updateColumnsBasedOnView();
       setSelectedTask(updatedTask);
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
-      // If the task has a reward, show the payment dialog
+      // Check for escrow release first, then payment
       if (
+        !reviewerAction &&
+        updatedTask.escrowEnabled &&
+        updatedTask.escrowStatus === "locked"
+      ) {
+        setEscrowTask(updatedTask);
+        setEscrowMode("release");
+        setIsEscrowPopupOpen(true);
+      } else if (
         !reviewerAction &&
         updatedTask.reward &&
         updatedTask.rewardAmount &&
-        updatedTask.assigneeId
+        updatedTask.assigneeId &&
+        !updatedTask.escrowEnabled
       ) {
+        // Only show payment popup if no escrow
         setTaskToPay(updatedTask);
         setIsPaymentPopupOpen(true);
       } else {
@@ -1941,7 +2215,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         updatedAt: new Date().toISOString(),
       });
 
-      // Update our task lists
+      // Real-time listeners will handle the updates automatically
+      // But we update local state for immediate UI feedback
       const updateTaskInList = (list: Task[]) =>
         list.map((task) => (task.id === updatedTask.id ? updatedTask : task));
 
@@ -1953,6 +2228,8 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       updateColumnsBasedOnView();
 
       setSelectedTask(updatedTask);
+      
+      // Real-time listeners will sync any changes from Firestore automatically
 
       toast({
         title: "Submission rejected",
@@ -1978,6 +2255,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       uniqueIds.map((taskId) =>
         updateTask(taskId, {
           paid: true,
+          status: "done", // Automatically move to done when paid
           updatedAt: timestamp,
         })
       )
@@ -1987,7 +2265,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     const updateTaskInList = (list: Task[]) =>
       list.map((task) =>
         uniqueIds.includes(task.id)
-          ? { ...task, paid: true, updatedAt: timestamp }
+          ? { ...task, paid: true, status: "done", updatedAt: timestamp }
           : task
       );
 
@@ -1996,7 +2274,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
     setAssignedTasks((prev) => updateTaskInList(prev));
     setSelectedTask((prev) =>
       prev && uniqueIds.includes(prev.id)
-        ? { ...prev, paid: true, updatedAt: timestamp }
+        ? { ...prev, paid: true, status: "done", updatedAt: timestamp }
         : prev
     );
     updateColumnsBasedOnView();
@@ -2106,6 +2384,17 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       return;
     }
 
+    // Prevent dragging paid tasks
+    const paidTasks = tasksBeingMoved.filter((task) => task.paid);
+    if (paidTasks.length > 0) {
+      toast({
+        title: "Cannot move paid tasks",
+        description: "Tasks that have been paid cannot be moved",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const timestamp = new Date().toISOString();
     const newColumns = [...columns];
 
@@ -2163,22 +2452,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       return;
     }
 
-    // For single task moves to Done, show payment popup if payable
-    const payableTask = movedTasksWithStatus.find(
-      (task) =>
-        destination.droppableId === "done" &&
-        source.droppableId !== "done" &&
-        task.reward &&
-        task.rewardAmount &&
-        !task.paid &&
-        task.userId === account
-    );
-
-    if (payableTask) {
-      setTaskToPay(payableTask);
-      setIsPaymentPopupOpen(true);
-    }
-
+    // Update task status first
     try {
       await Promise.all(
         tasksBeingMoved.map((task) =>
@@ -2189,6 +2463,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         )
       );
 
+      // Update local state
       const updateTaskInList = (list: Task[]) =>
         list.map((task) =>
           taskIdsToMove.includes(task.id)
@@ -2203,6 +2478,36 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
       setAllTasks(updateTaskInList(allTasks));
       setCreatedTasks(updateTaskInList(createdTasks));
       setAssignedTasks(updateTaskInList(assignedTasks));
+
+      // For single task moves to Done, check for escrow release or payment
+      const taskMovingToDone = movedTasksWithStatus.find(
+        (task) =>
+          destination.droppableId === "done" &&
+          source.droppableId !== "done"
+      );
+
+      if (taskMovingToDone) {
+        // Check if task has escrow that needs to be released
+        if (taskMovingToDone.escrowEnabled && taskMovingToDone.escrowStatus === "locked") {
+          setEscrowTask(taskMovingToDone);
+          setEscrowMode("release");
+          setIsEscrowPopupOpen(true);
+          // Status is already updated, escrow release will mark as paid
+          return;
+        }
+
+        // Otherwise, show payment popup if payable (and no escrow)
+        if (
+          taskMovingToDone.reward &&
+          taskMovingToDone.rewardAmount &&
+          !taskMovingToDone.paid &&
+          taskMovingToDone.userId === account &&
+          !taskMovingToDone.escrowEnabled
+        ) {
+          setTaskToPay(taskMovingToDone);
+          setIsPaymentPopupOpen(true);
+        }
+      }
     } catch (error) {
       console.error("Error updating task:", error);
       toast({
@@ -2799,7 +3104,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
               <ResizablePanelGroup direction="horizontal" className="flex-1 h-full min-h-0 overflow-hidden">
                 {showAnalysisPanel && userProjectRole === "admin" && (
                   <ResizablePanel defaultSize={28} minSize={24} className="min-h-0 p-6">
-                    <div className="relative h-full min-h-0 overflow-y-auto overscroll-contain space-y-4">
+                    <div className="relative h-full min-h-0 overflow-y-auto overscroll-contain space-y-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                        <ThreeBackground />
                        <div className="text-xs font-semibold tracking-wide uppercase">Contributor Analysis</div>
                     <div className="text-[11px] text-muted-foreground">
@@ -2927,7 +3232,15 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                         })}
                       </div>
                     ) : (
-                      <div className="text-[11px] text-muted-foreground">No contributor data yet.</div>
+                      <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-6 text-center">
+                        <UserCircle className="h-10 w-10 text-slate-400 dark:text-slate-600 mx-auto mb-2" />
+                        <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">No contributors yet</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-500">
+                          {allTasks.length === 0 
+                            ? "Create tasks with assignees to see analysis"
+                            : "Assign tasks to team members to track their performance"}
+                        </p>
+                      </div>
                     )}
                     </div>
                   </ResizablePanel>
@@ -2937,7 +3250,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
                 {/* Task Form Panel */}
                 <ResizablePanel defaultSize={52} minSize={42} className="min-h-0 p-4 sm:p-6 bg-gradient-to-b from-slate-50/50 to-white dark:from-slate-900/50 dark:to-slate-950">
-                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain space-y-4 sm:space-y-5">
+                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain space-y-4 sm:space-y-5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
 
                   {/* Task Name */}
                   <div className="space-y-2">
@@ -2988,17 +3301,44 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                       <Award className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                       <span className="text-xs sm:text-sm">Open Bounty</span>
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setNewTask({ ...newTask, escrowEnabled: !newTask.escrowEnabled });
-                      }}
-                      className={`rounded-full transition-all duration-300 ${newTask.escrowEnabled ? "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white border-transparent shadow-lg shadow-blue-500/30" : "hover:border-blue-400 hover:text-blue-600 dark:hover:border-blue-500"}`}
-                    >
-                      <Lock className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
-                      <span className="text-xs sm:text-sm">Enable Escrow</span>
-                    </Button>
+                    {/* Escrow - Only for project admins */}
+                    {(!projectId || userProjectRole === "admin") && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          // Validate escrow requirements before enabling
+                          if (!newTask.escrowEnabled) {
+                            if (!newTask.reward || !newTask.rewardAmount) {
+                              toast({
+                                title: "Reward required",
+                                description: "Please add a reward before enabling escrow",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            if (!newTask.isOpenBounty && !newTask.assigneeId) {
+                              toast({
+                                title: "Assignee required",
+                                description: "Please assign a contributor or enable open bounty before enabling escrow",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                          }
+                          setNewTask({ ...newTask, escrowEnabled: !newTask.escrowEnabled });
+                        }}
+                        className={`rounded-full transition-all duration-300 ${newTask.escrowEnabled ? "bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white border-transparent shadow-lg shadow-blue-500/30" : "hover:border-blue-400 hover:text-blue-600 dark:hover:border-blue-500"}`}
+                        title={
+                          newTask.escrowEnabled
+                            ? "Escrow enabled - tokens will be locked"
+                            : "Enable escrow protection (requires reward and assignee)"
+                        }
+                      >
+                        <Lock className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
+                        <span className="text-xs sm:text-sm">Enable Escrow</span>
+                      </Button>
+                    )}
                   </div>
 
                   {/* Description */}
@@ -3055,7 +3395,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
                 {/* Metadata Sidebar Panel */}
                 <ResizablePanel defaultSize={20} minSize={18} className="min-h-0 border-l border-slate-200 dark:border-slate-800 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4 sm:p-6">
-                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain space-y-5 sm:space-y-6">
+                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain space-y-5 sm:space-y-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                   {/* Status */}
                   <StatusSelect
                     value={newTask.status}
@@ -3375,7 +3715,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                           key={task.id}
                                           draggableId={task.id}
                                           index={currentIndex}
-                                          isDragDisabled={!canDragTasks}
+                                          isDragDisabled={!canDragTasks || task.paid}
                                         >
                                           {(provided, snapshot) => (
                                             <TaskCard
@@ -3422,7 +3762,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                                           key={task.id}
                                           draggableId={task.id}
                                           index={currentIndex}
-                                          isDragDisabled={!canDragTasks}
+                                          isDragDisabled={!canDragTasks || task.paid}
                                         >
                                           {(provided, snapshot) => (
                                             <TaskCard
@@ -3477,7 +3817,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                             key={task.id}
                             draggableId={task.id}
                             index={index}
-                            isDragDisabled={!canDragTasks}
+                            isDragDisabled={!canDragTasks || task.paid}
                           >
                             {(provided, snapshot) => (
                               <TaskCard
@@ -3534,7 +3874,7 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                       <DialogDescription className="break-words mt-1 text-xs sm:text-sm text-slate-600 dark:text-slate-400">View and manage task details</DialogDescription>
                     )}
                   </div>
-                  {selectedTask.userId === account && !isEditMode && (
+                  {selectedTask.userId === account && !isEditMode && !selectedTask.paid && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -3681,12 +4021,22 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                       {!editedTask.isOpenBounty && (
                         <div className="grid gap-2">
                           <UserSearchSelect
-                            label="Assignee"
-                            placeholder="Search by username or wallet address..."
+                            label={selectedTask.escrowEnabled ? "Assignee (Locked)" : "Assignee"}
+                            placeholder={selectedTask.escrowEnabled ? "Assignee cannot be changed for escrow tasks" : "Search by username or wallet address..."}
                             selectedUserId={editedTask.assigneeId}
                             availableUsers={availableUsers}
                             isLoadingUsers={isLoadingUsers}
-                            onSelectUser={(userId) => setEditedTask({ ...editedTask, assigneeId: userId })}
+                            onSelectUser={(userId) => {
+                              if (!selectedTask.escrowEnabled) {
+                                setEditedTask({ ...editedTask, assigneeId: userId });
+                              } else {
+                                toast({
+                                  title: "Cannot change assignee",
+                                  description: "Assignee cannot be changed for escrow-enabled tasks",
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
                             emptyLabel="Unassigned"
                           />
                         </div>
@@ -4649,6 +4999,71 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         }}
         task={taskToPay}
         onPaymentComplete={handlePaymentComplete}
+      />
+
+      {/* Escrow Popup */}
+      <EscrowPopup
+        isOpen={isEscrowPopupOpen}
+        onClose={() => {
+          setIsEscrowPopupOpen(false);
+          setEscrowTask(null);
+        }}
+        task={escrowTask}
+        mode={escrowMode}
+        onSuccess={async () => {
+          if (!escrowTask) return;
+
+          if (escrowMode === "lock") {
+            // Update task with escrow locked status
+            await updateTask(escrowTask.id, {
+              escrowStatus: "locked",
+            });
+
+            // Close dialog and reset form
+            setNewTask({
+              title: "",
+              description: "",
+              status: "todo",
+              priority: "medium",
+              isOpenBounty: false,
+              escrowEnabled: false,
+              tags: [],
+            });
+
+            setIsDialogOpen(false);
+            setShowRewardSection(false);
+
+            toast({
+              title: "Task created",
+              description: "Your task has been created and escrow locked successfully",
+            });
+          } else {
+            // Release mode - update task status and mark as paid
+            await updateTask(escrowTask.id, {
+              escrowStatus: "released",
+              paid: true,
+              status: "done",
+            });
+
+            // Update local state
+            const updatedTask = {
+              ...escrowTask,
+              escrowStatus: "released" as const,
+              paid: true,
+              status: "done",
+            };
+            syncTaskAcrossState(updatedTask);
+            updateColumnsBasedOnView();
+            if (selectedTask?.id === updatedTask.id) {
+              setSelectedTask(updatedTask);
+            }
+
+            toast({
+              title: "Escrow released",
+              description: "Tokens have been released to the assignee",
+            });
+          }
+        }}
       />
     </div>
   );
