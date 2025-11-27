@@ -23,7 +23,8 @@ import {
   type User,
 } from "firebase/auth";
 import { getStorage, ref, type StorageReference } from "firebase/storage";
-import type { ProjectMember, UserProfile } from "@/lib/types";
+import type { ProjectMember, UserProfile, EventLogs } from "@/lib/types";
+import { Timestamp } from "firebase/firestore";
 
 // Firebase configuration
 const firebaseConfig = {
@@ -93,6 +94,8 @@ interface FirebaseContextType {
     requestId: string,
     action: "accepted" | "rejected"
   ) => Promise<void>;
+  // Event Logging
+  logEvent: (event: Omit<EventLogs, "eventId" | "createdAt">) => Promise<string>;
 }
 
 // Enhanced function to remove undefined fields recursively, handling nested objects and arrays
@@ -184,6 +187,7 @@ const FirebaseContext = createContext<FirebaseContextType>({
   applyToJoinProject: async (): Promise<string> => "",
   getJoinRequestsForProject: async (): Promise<any[]> => [],
   respondToProjectJoinRequest: async (): Promise<void> => {},
+  logEvent: async (): Promise<string> => "",
 });
 
 export const useFirebase = () => useContext(FirebaseContext);
@@ -1376,6 +1380,36 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Event Logging function
+  const logEvent = async (event: Omit<EventLogs, "eventId" | "createdAt">): Promise<string> => {
+    if (!db) {
+      console.error("Firestore is not initialized when trying to log event");
+      return "";
+    }
+
+    try {
+      // Generate unique event ID
+      const eventId = typeof globalThis.crypto !== "undefined" &&
+        typeof globalThis.crypto.randomUUID === "function"
+          ? globalThis.crypto.randomUUID()
+          : Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+      const eventLog: EventLogs = {
+        ...event,
+        eventId,
+        createdAt: Timestamp.now(),
+      };
+
+      const eventsCollection = collection(db, "eventLogs");
+      const docRef = await addDoc(eventsCollection, eventLog);
+      
+      return docRef.id;
+    } catch (error) {
+      console.error("Error logging event:", error);
+      return "";
+    }
+  };
+
   return (
     <FirebaseContext.Provider
       value={{
@@ -1415,6 +1449,8 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
         applyToJoinProject,
         getJoinRequestsForProject,
         respondToProjectJoinRequest,
+        // Event Logging
+        logEvent,
       }}
     >
       {children}

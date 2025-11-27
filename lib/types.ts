@@ -118,11 +118,20 @@ export interface ProjectMember {
 }
 
 export interface EventLogs {
-  eventId : string,
-  taskId : string,
-  projectId : string,
-  actor: string,
-  action : "created"|"updated"|"moved"|"assigned"|"commented"|"attachment_uploaded"|"escrow_released",
-  meta: { fromColumn:string,toColumn:string },
-  createdAt: Timestamp
+  eventId: string;
+  taskId?: string;
+  projectId?: string;
+  actor: string;
+  actorId?: string; // User profile ID
+  action: "created" | "updated" | "moved" | "assigned" | "deleted" | "commented" | "attachment_uploaded" | "escrow_locked" | "escrow_released" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "submission_submitted" | "submission_approved" | "submission_rejected" | "payment_processed" | "batch_payment_processed" | "project_joined" | "project_left";
+  meta?: {
+    fromColumn?: string;
+    toColumn?: string;
+    field?: string;
+    oldValue?: any;
+    newValue?: any;
+    [key: string]: any; // Allow additional metadata
+  };
+  description?: string;
+  createdAt: Timestamp;
 }

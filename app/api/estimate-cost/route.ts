@@ -68,7 +68,35 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   try {
     const { title = "", description = "", tags = [], priority = "normal" } = body || {};
+    // NEW: return zero estimate when absolutely nothing meaningful is passed
+    const cleanedTags = Array.isArray(tags)
+    ? tags.filter(t => typeof t === "string" && t.trim() !== "")
+    : [];
+  
+  const allEmpty =
+    (!title || title.trim() === "") &&
+    (!description || description.trim() === "") &&
+    cleanedTags.length === 0;
 
+if (allEmpty) {
+return NextResponse.json({
+  source: "empty",
+  estimate: {
+    totalUSD: 0,
+    estimatedHours: 0,
+    baseRateUSD: 0,
+    breakdown: {
+      lengthHours: 0,
+      titleHoursAdj: 0,
+      descriptionHoursAdj: 0,
+      tagMultiplier: 1,
+      priorityMultiplier: 1,
+    },
+    notes: "No information provided — defaulting to zero estimate."
+  }
+}, { status: 200 });
+}
+    
     // Compute a baseline heuristic to guide the model and use as fallback
     const baseline = estimateTaskCostUSD({ title, description, tags, priority });
 
@@ -195,10 +223,6 @@ Return JSON only.`;
 
     return NextResponse.json({ source: "ai", estimate, notes: parsed.notes ?? "" }, { status: 200 });
   } catch (err) {
-    // Log full Gemini error so we can diagnose precisely
-    const errorMsg = (err as any)?.message ?? String(err);
-    const errorStack = (err as any)?.stack ?? undefined;
-    console.error("gemini_error", { message: errorMsg, stack: errorStack });
 
     try {
       const { title = "", description = "", tags = [], priority = "normal" } = body || {};
@@ -214,7 +238,7 @@ Return JSON only.`;
       const totalUSD = Math.max(0, Math.round(hours * rate));
       const fallback = { ...baseline, baseRateUSD: rate, totalUSD } satisfies CostEstimate;
       console.log("heuristic_ai_error", { tags, priority, title, description, hours, rate });
-      return NextResponse.json({ source: "heuristic", estimate: fallback, error: "ai_error", details: errorMsg }, { status: 200 });
+      return NextResponse.json({ source: "heuristic", estimate: fallback, error: "ai_error"}, { status: 200 });
     } catch {
       return NextResponse.json({ error: "failed" }, { status: 500 });
     }

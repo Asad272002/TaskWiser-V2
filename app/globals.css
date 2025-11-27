@@ -174,8 +174,19 @@
     @apply bg-card;
     @apply p-3;
     @apply shadow-md;
-    @apply transition-all;
+    /* Transition only non-transform properties to avoid drag interference */
+    transition-property: background-color, border-color, color, box-shadow, opacity;
+    transition-duration: 200ms;
+    transition-timing-function: ease;
     @apply hover:shadow-lg;
+    /* Ensure smooth touch interactions */
+    touch-action: pan-y;
+  }
+  
+  /* When dragging, disable touch actions */
+  .task-card.is-dragging,
+  [data-rbd-drag-handle-draggable-id] .task-card {
+    touch-action: none !important;
   }
 
   /* Priority border styles */
@@ -249,6 +260,97 @@
 
   .dark-dropdown {
     @apply dark:bg-gray-800 dark:border-gray-700;
+  }
+
+  /* Drag and Drop Styles - @hello-pangea/dnd */
+  /* The library creates a portal for the drag preview at body level */
+  
+  /* Prevent text selection during drag - improves drag accuracy */
+  [data-rbd-drag-handle-context-id][data-rbd-is-drag-occurring="true"] {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+  }
+
+  /* Drag preview in portal - target the element that's rendered at body level */
+  /* The library uses position: fixed for the drag preview */
+  [data-rbd-drag-handle-draggable-id][style*="position: fixed"],
+  body > [data-rbd-drag-handle-draggable-id] {
+    z-index: 99999 !important;
+    pointer-events: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    /* Ensure cursor is grabbing during drag */
+    cursor: grabbing !important;
+  }
+
+  /* Task card inside the drag preview portal */
+  [data-rbd-drag-handle-draggable-id][style*="position: fixed"] .task-card,
+  body > [data-rbd-drag-handle-draggable-id] .task-card {
+    transform: rotate(2deg) !important;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1) !important;
+    opacity: 0.95 !important;
+  }
+
+  /* Column droppable area - ensure proper positioning context */
+  [data-rbd-droppable-id] {
+    position: relative;
+    /* Prevent stacking context issues - isolation was removed from component */
+  }
+
+  /* Kanban column container */
+  .kanban-column {
+    position: relative;
+  }
+
+  /* Task card when dragging - styling for the preview in portal */
+  .task-card.is-dragging {
+    transform: rotate(2deg) !important;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1) !important;
+    opacity: 0.95 !important;
+    /* Disable all transitions during drag to prevent positioning issues */
+    transition: none !important;
+  }
+
+  /* Original task card (ghost) when dragging - make it semi-transparent */
+  [data-rbd-draggable-id]:not([style*="position: fixed"])[data-rbd-drag-handle-draggable-id] {
+    opacity: 0.3 !important;
+    /* Disable transitions on the ghost element */
+    transition: opacity 0.2s ease !important;
+  }
+
+  /* Prevent transform transitions on draggable elements - they interfere with drag positioning */
+  [data-rbd-draggable-id] {
+    transition-property: background-color, border-color, color, opacity !important;
+    transition-duration: 200ms !important;
+    transition-timing-function: ease !important;
+  }
+  
+  /* Ensure drag preview has no transitions */
+  [data-rbd-drag-handle-draggable-id][style*="position: fixed"],
+  body > [data-rbd-drag-handle-draggable-id] {
+    transition: none !important;
+  }
+
+  /* Prevent parent containers from creating problematic stacking contexts */
+  [data-rbd-droppable-context-id] {
+    position: relative;
+    /* Avoid isolation which creates new stacking contexts */
+  }
+
+  /* Global drag state - prevent text selection and improve drag performance */
+  body.is-dragging {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    cursor: grabbing !important;
+  }
+  
+  body.is-dragging * {
+    cursor: grabbing !important;
+  }
+  
+  /* Exception for the drag preview itself */
+  body.is-dragging [data-rbd-drag-handle-draggable-id][style*="position: fixed"] {
+    cursor: grabbing !important;
   }
 }
 
