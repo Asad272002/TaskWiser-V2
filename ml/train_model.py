@@ -69,7 +69,8 @@ y = np.array(y)
 
 # 3. Train Model
 # SGDRegressor is sensitive to feature scaling, so we use a pipeline with StandardScaler
-model = make_pipeline(StandardScaler(), SGDRegressor(max_iter=1000, tol=1e-3))
+# Using learning_rate='constant' and higher eta0 to allow faster adaptation to new data (online learning)
+model = make_pipeline(StandardScaler(), SGDRegressor(max_iter=1000, tol=1e-3, learning_rate='constant', eta0=0.05))
 model.fit(X, y)
 
 # 4. Save Model
