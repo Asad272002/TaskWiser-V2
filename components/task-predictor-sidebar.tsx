@@ -11,9 +11,10 @@ import { estimateTaskCostUSD, type CostEstimate as HeuristicEstimate } from "@/l
 import type { UserProfile } from "@/lib/types";
 
 type Props = {
-  newTask: { title?: string; description?: string; priority?: string };
+  newTask: { title?: string; description?: string; priority?: string; tags?: string[] };
   availableUsers: UserProfile[];
   onApplyReward?: (amount: number) => void;
+  onEstimateChange?: (estimate: CostEstimate | null, isAI: boolean) => void;
 };
 
 type CostEstimate = {
@@ -58,13 +59,13 @@ function matchContributors(users: UserProfile[], keywords: string[]) {
     .map((s) => s.user);
 }
 
-export function TaskPredictorSidebar({ newTask, availableUsers, onApplyReward }: Props) {
+export function TaskPredictorSidebar({ newTask, availableUsers, onApplyReward, onEstimateChange }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<CostEstimate | null>(null);
   const [heuristic, setHeuristic] = useState<HeuristicEstimate | null>(null);
-  const [useAI, setUseAI] = useState(false);
+  const [useAI, setUseAI] = useState(true);
 
   const keywords = useMemo(
     () => extractKeywords(`${newTask.title || ""} ${newTask.description || ""}`),
@@ -78,6 +79,11 @@ export function TaskPredictorSidebar({ newTask, availableUsers, onApplyReward }:
     setEstimate(null);
     setHeuristic(null);
     setSource(null);
+    if (onEstimateChange) onEstimateChange(null, useAI);
+
+    // Merge extracted keywords with manual tags
+    const combinedTags = Array.from(new Set([...keywords, ...(newTask.tags || [])]));
+    
     try {
       if (useAI) {
         const res = await fetch("/api/estimate-cost", {
@@ -86,7 +92,7 @@ export function TaskPredictorSidebar({ newTask, availableUsers, onApplyReward }:
           body: JSON.stringify({
             title: newTask.title || "",
             description: newTask.description || "",
-            tags: keywords,
+            tags: combinedTags,
             priority: (newTask.priority as any) || "normal",
           }),
         });
@@ -97,7 +103,9 @@ export function TaskPredictorSidebar({ newTask, availableUsers, onApplyReward }:
         setSource(data?.source || (data?.ai_error ? "heuristic" : "ai"));
         const e = data?.estimate;
         if (e && typeof e.totalUSD === "number" && typeof e.estimatedHours === "number") {
-          setEstimate({ totalUSD: e.totalUSD, estimatedHours: e.estimatedHours, baseRateUSD: e.baseRateUSD || 50 });
+          const newEst = { totalUSD: e.totalUSD, estimatedHours: e.estimatedHours, baseRateUSD: e.baseRateUSD || 50 };
+          setEstimate(newEst);
+          if (onEstimateChange) onEstimateChange(newEst, true);
         }
       } else {
         const h = estimateTaskCostUSD({
@@ -108,7 +116,9 @@ export function TaskPredictorSidebar({ newTask, availableUsers, onApplyReward }:
         });
         setHeuristic(h);
         setSource("heuristic");
-        setEstimate({ totalUSD: h.totalUSD, estimatedHours: h.estimatedHours, baseRateUSD: h.baseRateUSD });
+        const newEst = { totalUSD: h.totalUSD, estimatedHours: h.estimatedHours, baseRateUSD: h.baseRateUSD };
+        setEstimate(newEst);
+        if (onEstimateChange) onEstimateChange(newEst, false);
       }
     } catch (e: any) {
       setError(e?.message || "Network error.");

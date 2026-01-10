@@ -90,6 +90,7 @@ import { deleteField } from "firebase/firestore";
 import { ThreeBackground } from "./three-bg";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { estimateTaskCostUSD, type CostEstimate } from "@/lib/cost-estimator";
+import { TaskPredictorSidebar } from "./task-predictor-sidebar";
 import { SPECIALTY_OPTIONS } from "@/lib/constants";
 
 type Column = {
@@ -177,43 +178,6 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
   const [aiEstimate, setAiEstimate] = useState<CostEstimate | null>(null);
   const [aiEstimating, setAiEstimating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!useAIEstimator) {
-      setAiEstimate(null);
-      return;
-    }
-    const payload = {
-      title: newTask.title || "",
-      description: newTask.description || "",
-      tags: newTask.tags || [],
-      priority: newTask.priority || "medium",
-    };
-    setAiEstimating(true);
-    setAiError(null);
-    const handle = setTimeout(async () => {
-      try {
-        const res = await fetch("/api/estimate-cost", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (res.ok && data?.estimate) {
-          setAiEstimate(data.estimate as CostEstimate);
-        } else {
-          setAiError("Estimation failed");
-          setAiEstimate(null);
-        }
-      } catch (e) {
-        setAiError("Network error");
-        setAiEstimate(null);
-      } finally {
-        setAiEstimating(false);
-      }
-    }, 600);
-    return () => clearTimeout(handle);
-  }, [useAIEstimator, newTask.title, newTask.description, newTask.tags, newTask.priority]);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -1514,6 +1478,20 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
         if (newTask.assigneeId === account) {
           setAssignedTasks((prev) => [...prev, newTaskWithId]);
         }
+      }
+
+      // Train ML model if cost is provided
+      if (newTask.rewardAmount && newTask.rewardAmount > 0) {
+        fetch("/api/update-model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: newTask.title,
+            description: newTask.description || "",
+            tags: newTask.tags || [],
+            actual_cost: Number(newTask.rewardAmount)
+          })
+        }).catch(e => console.error("Model update failed", e));
       }
 
       // Update columns based on current view
@@ -3331,61 +3309,21 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                   <ResizablePanel defaultSize={28} minSize={24} className="min-h-0 p-6">
                     <div className="relative h-full min-h-0 overflow-y-auto overscroll-contain space-y-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                        <ThreeBackground />
+                       
+                       {/* AI Predictor */}
+                       <TaskPredictorSidebar
+                         newTask={newTask}
+                         availableUsers={availableUsers}
+                         onApplyReward={(amount) => setNewTask({ ...newTask, rewardAmount: amount, reward: newTask.reward || "USDC" })}
+                         onEstimateChange={(estimate, isAI) => {
+                           setAiEstimate(estimate);
+                           setUseAIEstimator(isAI);
+                         }}
+                       />
+
                        <div className="text-xs font-semibold tracking-wide uppercase">Contributor Analysis</div>
                     <div className="text-[11px] text-muted-foreground">
                       {analysisTag ? `Tag: ${String(analysisTag)}` : "General performance"}
-                    </div>
-
-                    {/* Estimated Cost Card */}
-                    <div className="space-y-2 rounded-xl border shadow-sm backdrop-blur-sm bg-white/80 dark:bg-[#1e1e1e]/70 p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-xs font-semibold tracking-wide uppercase">Estimated Cost (USD)</div>
-                        <div className="flex items-center gap-2">
-                          <Label htmlFor="ai-estimator" className="text-[10px]">Use AI</Label>
-                          <Switch id="ai-estimator" checked={useAIEstimator} onCheckedChange={setUseAIEstimator} />
-                          <Badge variant="outline" className="text-[10px]">Real-time</Badge>
-                        </div>
-                      </div>
-                      {useAIEstimator ? (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="text-2xl font-bold">${aiEstimate ? aiEstimate.totalUSD.toLocaleString() : '0'}</div>
-                            {aiEstimating && <span className="text-[10px] text-muted-foreground">EstimatingΓÇª</span>}
-                          </div>
-                          {aiError ? (
-                            <div className="text-[11px] text-red-600">{aiError}</div>
-                          ) : (
-                            <div className="text-[11px] text-muted-foreground">Est. Hours: {aiEstimate?.estimatedHours ?? 0} @ ${aiEstimate?.baseRateUSD ?? 50}/hr</div>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          <div className="text-2xl font-bold">${typeof costEstimate?.totalUSD === 'number' ? costEstimate.totalUSD.toLocaleString() : '0'}</div>
-                          <div className="text-[11px] text-muted-foreground">Est. Hours: {costEstimate?.estimatedHours ?? 0} @ ${costEstimate?.baseRateUSD ?? 50}/hr</div>
-                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
-                              <div className="font-medium">Length</div>
-                              <div className="text-muted-foreground">{costEstimate?.breakdown.lengthHours ?? 0}h</div>
-                            </div>
-                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
-                              <div className="font-medium">Title</div>
-                              <div className="text-muted-foreground">+{costEstimate?.breakdown.titleHoursAdj ?? 0}h</div>
-                            </div>
-                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
-                              <div className="font-medium">Description</div>
-                              <div className="text-muted-foreground">+{costEstimate?.breakdown.descriptionHoursAdj ?? 0}h</div>
-                            </div>
-                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
-                              <div className="font-medium">Tags</div>
-                              <div className="text-muted-foreground">x{costEstimate?.breakdown.tagMultiplier ?? 1}</div>
-                            </div>
-                            <div className="rounded-md border p-2 bg-white/60 dark:bg-[#2a2a2a]">
-                              <div className="font-medium">Priority</div>
-                              <div className="text-muted-foreground">x{costEstimate?.breakdown.priorityMultiplier ?? 1}</div>
-                            </div>
-                          </div>
-                        </>
-                      )}
                     </div>
 
                     {!!contributorStats.length ? (
@@ -3584,16 +3522,6 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
 
                   {/* Create Button */}
                   <div className="pt-4 space-y-3">
-                    {userProjectRole === "admin" && (
-                      <div className="rounded-lg bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-950/30 dark:to-indigo-950/30 p-3 border border-purple-200 dark:border-purple-800/50">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Estimated Cost:</span>
-                          <span className="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent">
-                            ${useAIEstimator && aiEstimate ? aiEstimate.totalUSD.toLocaleString() : (typeof costEstimate?.totalUSD === 'number' ? costEstimate.totalUSD.toLocaleString() : '0')}
-                          </span>
-                        </div>
-                      </div>
-                    )}
                     <Button
                       onClick={handleCreateTask}
                       disabled={isLoading}
@@ -3621,6 +3549,9 @@ export function KanbanBoard({ projectId }: { projectId?: string } = {}) {
                 {/* Metadata Sidebar Panel */}
                 <ResizablePanel defaultSize={20} minSize={18} className="min-h-0 border-l border-slate-200 dark:border-slate-800 bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4 sm:p-6">
                    <div className="h-full min-h-0 overflow-y-auto overscroll-contain space-y-5 sm:space-y-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  
+                  {/* AI Predictor moved to Analysis Panel */}
+
                   {/* Status */}
                   <StatusSelect
                     value={newTask.status}

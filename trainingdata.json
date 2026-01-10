@@ -1,0 +1,482 @@
+[
+  {
+    "title": "Fix login redirect bug",
+    "description": "Users are redirected to dashboard even when authentication fails. Debug and fix auth redirect logic.",
+    "tags": ["Frontend", "Backend", "Security"],
+    "cost_usd": 40
+  },
+  {
+    "title": "Responsive landing page build",
+    "description": "Create a responsive marketing landing page with hero section, features, and contact form.",
+    "tags": ["Frontend", "UI/UX", "Marketing"],
+    "cost_usd": 70
+  },
+  {
+    "title": "User profile update API",
+    "description": "Develop backend API for updating user profile information with validation.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 55
+  },
+  {
+    "title": "Admin dashboard layout",
+    "description": "Build admin dashboard UI with sidebar, header, and content area.",
+    "tags": ["Frontend", "UI/UX", "Product Management"],
+    "cost_usd": 90
+  },
+  {
+    "title": "Fix image upload failures",
+    "description": "Debug and resolve intermittent image upload issues on backend.",
+    "tags": ["Backend", "QA"],
+    "cost_usd": 50
+  },
+  {
+    "title": "Convert Figma to HTML",
+    "description": "Convert provided Figma design into clean HTML and CSS.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 80
+  },
+  {
+    "title": "Email notifications for forms",
+    "description": "Send automated emails when contact forms are submitted.",
+    "tags": ["Backend", "Marketing"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Fix mobile layout issues",
+    "description": "Resolve layout breakage on small screen devices.",
+    "tags": ["Frontend", "Mobile", "UI/UX"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Role-based access control",
+    "description": "Restrict system access based on admin and user roles.",
+    "tags": ["Backend", "Security", "Product Management"],
+    "cost_usd": 95
+  },
+  {
+    "title": "Optimize database queries",
+    "description": "Improve performance by optimizing slow database queries.",
+    "tags": ["Backend", "Analytics"],
+    "cost_usd": 75
+  },
+  {
+    "title": "Password reset flow",
+    "description": "Implement secure password reset via email tokens.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 85
+  },
+  {
+    "title": "Basic search functionality",
+    "description": "Add keyword search to existing dataset.",
+    "tags": ["Backend", "Product Management"],
+    "cost_usd": 60
+  },
+  {
+    "title": "Reusable button component",
+    "description": "Create reusable button component with variants.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Fix API CORS issue",
+    "description": "Resolve CORS errors blocking frontend requests.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Loading indicators for pages",
+    "description": "Add loaders while async data is fetched.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 25
+  },
+  {
+    "title": "Environment variables setup",
+    "description": "Move secrets and configs into environment variables.",
+    "tags": ["DevOps", "Security"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Logout bug fix",
+    "description": "Ensure sessions and tokens are cleared on logout.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Write basic unit tests",
+    "description": "Add unit tests for core application logic.",
+    "tags": ["QA", "Backend"],
+    "cost_usd": 55
+  },
+  {
+    "title": "Fix date formatting",
+    "description": "Standardize date display across application.",
+    "tags": ["Frontend", "QA"],
+    "cost_usd": 25
+  },
+  {
+    "title": "CSV export feature",
+    "description": "Allow admins to export records as CSV files.",
+    "tags": ["Backend", "Analytics"],
+    "cost_usd": 55
+  },
+  {
+    "title": "Improve form validation UX",
+    "description": "Make form error messages clearer and consistent.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Backend logging setup",
+    "description": "Add request and error logging to backend services.",
+    "tags": ["Backend", "DevOps"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Fix broken internal links",
+    "description": "Identify and repair broken links across site.",
+    "tags": ["Frontend", "Content"],
+    "cost_usd": 25
+  },
+  {
+    "title": "Delete confirmation modal",
+    "description": "Add confirmation modal before destructive actions.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Stripe checkout integration",
+    "description": "Integrate Stripe for one-time payments.",
+    "tags": ["Backend", "Product Management"],
+    "cost_usd": 120
+  },
+  {
+    "title": "CSS cleanup and refactor",
+    "description": "Remove unused CSS and refactor styles.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 50
+  },
+  {
+    "title": "Breadcrumb navigation",
+    "description": "Add breadcrumb navigation for better usability.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Fix file download corruption",
+    "description": "Resolve file corruption during downloads.",
+    "tags": ["Backend", "QA"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Dark mode toggle",
+    "description": "Implement light/dark theme switching.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 60
+  },
+  {
+    "title": "Page speed optimization",
+    "description": "Optimize assets to improve page load speed.",
+    "tags": ["Frontend", "Analytics"],
+    "cost_usd": 70
+  },
+  {
+    "title": "FAQ page creation",
+    "description": "Create collapsible FAQ page for users.",
+    "tags": ["Frontend", "Content"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Timezone handling fix",
+    "description": "Correct timezone conversion issues in backend.",
+    "tags": ["Backend", "QA"],
+    "cost_usd": 50
+  },
+  {
+    "title": "Image compression on upload",
+    "description": "Compress uploaded images to reduce storage usage.",
+    "tags": ["Backend", "Cloud"],
+    "cost_usd": 65
+  },
+  {
+    "title": "Basic API caching",
+    "description": "Cache frequently requested API responses.",
+    "tags": ["Backend", "DevOps"],
+    "cost_usd": 80
+  },
+  {
+    "title": "User activity logs",
+    "description": "Log key user actions like login and updates.",
+    "tags": ["Backend", "Analytics"],
+    "cost_usd": 60
+  },
+  {
+    "title": "Navbar overlap fix",
+    "description": "Fix navbar overlapping content on scroll.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 20
+  },
+  {
+    "title": "SEO meta tags",
+    "description": "Add SEO and social sharing meta tags.",
+    "tags": ["Frontend", "Marketing"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Password strength indicator",
+    "description": "Add password strength meter on signup.",
+    "tags": ["Frontend", "Security"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Memory leak fix",
+    "description": "Investigate and fix memory leak in backend service.",
+    "tags": ["Backend", "QA"],
+    "cost_usd": 90
+  },
+  {
+    "title": "Profile picture upload",
+    "description": "Enable users to upload and update profile pictures.",
+    "tags": ["Frontend", "Backend"],
+    "cost_usd": 55
+  },
+  {
+    "title": "Custom error pages",
+    "description": "Design custom 404 and 500 error pages.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Session timeout adjustment",
+    "description": "Fix sessions expiring earlier than expected.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 50
+  },
+  {
+    "title": "Analytics page tracking",
+    "description": "Add basic page view analytics tracking.",
+    "tags": ["Analytics", "Marketing"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Dependency cleanup",
+    "description": "Remove unused packages and update dependencies.",
+    "tags": ["DevOps", "Security"],
+    "cost_usd": 40
+  },
+  {
+    "title": "Sortable data tables",
+    "description": "Add column sorting to tables.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Standardize API errors",
+    "description": "Return consistent error formats and status codes.",
+    "tags": ["Backend", "QA"],
+    "cost_usd": 55
+  },
+  {
+    "title": "Contact form backend",
+    "description": "Store contact form submissions in database.",
+    "tags": ["Backend", "Content"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Tooltips for forms",
+    "description": "Add tooltips to explain complex fields.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 25
+  },
+  {
+    "title": "Prevent duplicate submissions",
+    "description": "Stop duplicate form submissions on slow networks.",
+    "tags": ["Frontend", "QA"],
+    "cost_usd": 30
+  },
+  {
+    "title": "API documentation",
+    "description": "Write clear documentation for REST APIs.",
+    "tags": ["Documentation", "Technical Writing"],
+    "cost_usd": 65
+  },
+  {
+    "title": "Lazy load images",
+    "description": "Implement lazy loading for images.",
+    "tags": ["Frontend", "Analytics"],
+    "cost_usd": 40
+  },
+  {
+    "title": "Fix build warnings",
+    "description": "Resolve warnings during production build.",
+    "tags": ["DevOps", "QA"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Soft delete records",
+    "description": "Implement soft delete instead of permanent removal.",
+    "tags": ["Backend", "Product Management"],
+    "cost_usd": 70
+  },
+  {
+    "title": "Announcement banner",
+    "description": "Add dismissible banner for announcements.",
+    "tags": ["Frontend", "Content"],
+    "cost_usd": 30
+  },
+  {
+    "title": "API rate limiting",
+    "description": "Add rate limiting to prevent abuse.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 80
+  },
+  {
+    "title": "Mobile menu improvement",
+    "description": "Fix animation and touch issues in mobile menu.",
+    "tags": ["Frontend", "Mobile"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Database backup script",
+    "description": "Create automated daily database backup script.",
+    "tags": ["DevOps", "Cloud"],
+    "cost_usd": 60
+  },
+  {
+    "title": "File size validation",
+    "description": "Restrict uploaded file sizes with clear errors.",
+    "tags": ["Frontend", "Backend"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Button style consistency",
+    "description": "Standardize button styles across app.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 25
+  },
+  {
+    "title": "User onboarding guide",
+    "description": "Create onboarding guide for new users.",
+    "tags": ["Content", "Documentation"],
+    "cost_usd": 40
+  },
+  {
+    "title": "Search input debounce",
+    "description": "Reduce API calls by debouncing search input.",
+    "tags": ["Frontend", "Analytics"],
+    "cost_usd": 25
+  },
+  {
+    "title": "Accessibility alt text",
+    "description": "Add missing alt text to images.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 20
+  },
+  {
+    "title": "Forgot username feature",
+    "description": "Allow users to recover username via email.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 50
+  },
+  {
+    "title": "Auth middleware refactor",
+    "description": "Refactor authentication middleware for clarity.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 75
+  },
+  {
+    "title": "Chart rendering fix",
+    "description": "Fix charts not rendering on refresh.",
+    "tags": ["Frontend", "Analytics"],
+    "cost_usd": 45
+  },
+  {
+    "title": "User feedback form",
+    "description": "Collect and store user feedback.",
+    "tags": ["Frontend", "Backend"],
+    "cost_usd": 50
+  },
+  {
+    "title": "Optimize API payloads",
+    "description": "Remove unnecessary fields from API responses.",
+    "tags": ["Backend", "Analytics"],
+    "cost_usd": 40
+  },
+  {
+    "title": "Dropdown alignment fix",
+    "description": "Fix dropdown positioning on small screens.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 25
+  },
+  {
+    "title": "Sitemap generation",
+    "description": "Generate sitemap.xml for SEO.",
+    "tags": ["Marketing", "SEO"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Reusable modal component",
+    "description": "Create reusable modal component for dialogs.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 45
+  },
+  {
+    "title": "API naming cleanup",
+    "description": "Standardize API endpoint naming conventions.",
+    "tags": ["Backend", "Documentation"],
+    "cost_usd": 55
+  },
+  {
+    "title": "Notification emails",
+    "description": "Send email notifications for key actions.",
+    "tags": ["Backend", "Marketing"],
+    "cost_usd": 60
+  },
+  {
+    "title": "Accessibility contrast fix",
+    "description": "Improve color contrast for accessibility.",
+    "tags": ["Frontend", "UI/UX"],
+    "cost_usd": 35
+  },
+  {
+    "title": "Cache invalidation fix",
+    "description": "Fix stale data caused by caching issues.",
+    "tags": ["Backend", "DevOps"],
+    "cost_usd": 70
+  },
+  {
+    "title": "Audit trail logging",
+    "description": "Track changes made to critical records.",
+    "tags": ["Backend", "Security"],
+    "cost_usd": 80
+  },
+  {
+    "title": "System status page",
+    "description": "Create public system status page.",
+    "tags": ["Frontend", "Product Management"],
+    "cost_usd": 45
+  },
+  {
+    "title": "Form autofill fix",
+    "description": "Fix layout issues caused by browser autofill.",
+    "tags": ["Frontend", "QA"],
+    "cost_usd": 25
+  },
+  {
+    "title": "API health check",
+    "description": "Add endpoint to check API health.",
+    "tags": ["Backend", "DevOps"],
+    "cost_usd": 30
+  },
+  {
+    "title": "Large component refactor",
+    "description": "Split large frontend component into smaller ones.",
+    "tags": ["Frontend", "Full Stack"],
+    "cost_usd": 65
+  },
+  {
+    "title": "HTTP status code fix",
+    "description": "Ensure correct HTTP status codes are returned.",
+    "tags": ["Backend", "QA"],
+    "cost_usd": 40
+  }
+]
