@@ -25,6 +25,10 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     if (!jsonString.startsWith('{')) {
       jsonString = `{${jsonString}}`;
     }
+
+    // Attempt to fix single quotes used for keys (e.g. {'type': ...})
+    // This replaces 'key': with "key":
+    jsonString = jsonString.replace(/['](\w+)[']\s*:/g, '"$1":');
     
     // First, escape any literal control characters (actual newlines, tabs, etc.)
     // These are invalid in JSON and must be escaped
@@ -57,7 +61,8 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     
     serviceAccount = JSON.parse(jsonString);
   } catch (error) {
-    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY", error);
+    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY. Content snippet:", process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.substring(0, 50));
+    console.error("Error details:", error);
     // Do NOT fallback to path if key was provided but failed
   }
 } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
