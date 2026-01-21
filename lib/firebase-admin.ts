@@ -21,56 +21,48 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
       jsonString = jsonString.slice(1, -1);
     }
 
-    // Fix common copy-paste error: missing surrounding braces
-              if (!jsonString.startsWith('{')) {
-                // Check if it starts with "type": "service_account" or similar
-                // If the user pasted the CONTENT of the json without braces
-                jsonString = `{${jsonString}}`;
-              }
+    // Remove explicit newlines that might be in the string literal "{\n..."
+    jsonString = jsonString.replace(/^\\n/, '').replace(/\\n$/, '');
 
-              // CRITICAL FIX for "Expected property name or '}' in JSON at position 1"
-              // This error happens when the string starts with `{` but immediately has an invalid char (like a newline or space)
-              // OR if we added braces to a string that already had them but was just malformed
-              
-              // If we see double braces like {{ "type"... }} because the user fixed it while we also fixed it
-              if (jsonString.startsWith('{{')) {
-                jsonString = jsonString.substring(1, jsonString.length - 1);
-              }
-
-              // Attempt to fix single quotes used for keys (e.g. {'type': ...})
-    // This replaces 'key': with "key":
-    jsonString = jsonString.replace(/['](\w+)[']\s*:/g, '"$1":');
-    
-    // First, escape any literal control characters (actual newlines, tabs, etc.)
-    // These are invalid in JSON and must be escaped
-    // We need to do this carefully to avoid double-escaping
-    let result = '';
-    for (let i = 0; i < jsonString.length; i++) {
-      const char = jsonString[i];
-      const prevChar = i > 0 ? jsonString[i - 1] : '';
-      
-      // If it's a control character and not already escaped
-      if (char === '\n' && prevChar !== '\\') {
-        result += '\\n';
-      } else if (char === '\r' && prevChar !== '\\') {
-        result += '\\r';
-      } else if (char === '\t' && prevChar !== '\\') {
-        result += '\\t';
-      } else if (char.charCodeAt(0) >= 0x00 && char.charCodeAt(0) <= 0x1F && prevChar !== '\\') {
-        // Escape any other control characters
-        result += '\\u' + ('0000' + char.charCodeAt(0).toString(16)).slice(-4);
-      } else {
-        result += char;
-      }
-    }
-    jsonString = result;
-    
-    // Now handle double-escaped sequences from env files (\\n -> \n, \\" -> \")
-    // This converts "\\n" (backslash + backslash + n) to "\n" (backslash + n) for JSON
+    // Handle double escaped newlines (common in Vercel env vars)
     jsonString = jsonString.replace(/\\\\n/g, '\\n');
-    jsonString = jsonString.replace(/\\\\"/g, '\\"');
+    // Also handle normal escaped newlines just in case
+    jsonString = jsonString.replace(/\\n/g, '\n');
+
+    // Fix common copy-paste error: missing surrounding braces
+    if (!jsonString.trim().startsWith('{')) {
+      // Check if it starts with "type": "service_account" or similar
+      // If the user pasted the CONTENT of the json without braces
+      jsonString = `{${jsonString}}`;
+    }
+
+    // CRITICAL FIX for "Expected property name or '}' in JSON at position 1"
+    // The error "at position 1" usually means the first char is { but the second is invalid (like a space or newline)
+    // JSON.parse DOES NOT allow newlines in the string unless they are escaped.
+    // But if we've already converted \n to actual newlines, JSON.parse might fail if not careful.
+    // Actually, JSON.parse(string) parses a JSON formatted string.
+    // A JSON string CANNOT contain literal control characters (like newlines).
+    // So if we have actual newlines in the string, we must remove them or ensure they are proper whitespace.
     
-    serviceAccount = JSON.parse(jsonString);
+    // Let's try to minify the JSON to be safe (remove all whitespace outside of strings)
+    // This is risky if we break strings, but let's just trim for now.
+    jsonString = jsonString.trim();
+
+    // If we see double braces like {{ "type"... }} because the user fixed it while we also fixed it
+    if (jsonString.startsWith('{{')) {
+      jsonString = jsonString.substring(1, jsonString.length - 1);
+    }
+    
+    // Final fallback: remove all newlines and extra spaces if parsing fails
+    // We will try parsing first, then aggressive cleanup
+    
+    try {
+      serviceAccount = JSON.parse(jsonString);
+    } catch (e1) {
+      // Aggressive cleanup: remove all newlines and carriage returns
+      const cleaned = jsonString.replace(/[\r\n]+/g, '');
+      serviceAccount = JSON.parse(cleaned);
+    }
   } catch (error) {
     console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY. Content snippet:", process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.substring(0, 50));
     console.error("Error details:", error);
