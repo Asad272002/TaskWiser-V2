@@ -21,16 +21,27 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
       jsonString = jsonString.slice(1, -1);
     }
 
-    // Remove explicit newlines that might be in the string literal "{\n..."
-    // If the string contains literal newlines (0x0A), JSON.parse will fail.
-    // We must escape them to \\n.
-    jsonString = jsonString.replace(/\n/g, '\\n');
-    jsonString = jsonString.replace(/\r/g, '');
+    // SMART CLEANUP for Vercel Env Vars
+    // Vercel often injects literal "\n" characters for newlines in the UI.
+    // These break JSON.parse if they are outside strings (structural) 
+    // or if they are literal backslash+n inside strings (which JSON.parse reads as \\n).
+    
+    // 1. Remove literal "\n" that appear before a property name (structural)
+    //    e.g. { \n "type": ... }  -> { "type": ... }
+    //    e.g. , \n "project_id": ... -> , "project_id": ...
+    jsonString = jsonString.replace(/\\n(?=\s*")/g, '');
+    
+    // 2. Remove literal "\n" that appear before a closing brace (structural)
+    //    e.g. ... } \n } -> ... } }
+    jsonString = jsonString.replace(/\\n(?=\s*\})/g, '');
+    
+    // 3. Remove literal "\n" that appear after an opening brace (structural)
+    //    e.g. { \n "type" ... -> { "type" ...
+    jsonString = jsonString.replace(/\{\s*\\n/g, '{');
 
-    // Handle double escaped newlines (common in Vercel env vars)
-    // If we have \\n, we want to keep it as \\n for JSON.parse to read it as \n char
-    // But sometimes it comes as \\\\n which JSON.parse reads as \\n
-    // Let's just leave the escaping alone for a moment and rely on post-processing
+    // 4. Handle actual newlines (0x0A) if they somehow got in (rare in Vercel envs but possible)
+    //    We treat them as whitespace and let JSON.parse handle them, UNLESS they are inside strings.
+    //    But since we can't easily distinguish, we'll assume JSON.parse handles structural newlines.
     
     // Fix common copy-paste error: missing surrounding braces
     if (!jsonString.trim().startsWith('{')) {
@@ -45,20 +56,45 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     try {
       serviceAccount = JSON.parse(jsonString);
     } catch (e1) {
+      console.error("First parse attempt failed. Trying aggressive fixes.");
       // If parsing failed, it might be due to unquoted keys or single quotes
-      // Attempt to fix single quotes used for keys (e.g. {'type': ...})
-      const fixedQuotes = jsonString.replace(/['](\w+)[']\s*:/g, '"$1":');
+      
+      // Attempt to fix unquoted keys: type: "service_account" -> "type": "service_account"
+      // Matches: start-of-line/brace/comma + whitespace + word + whitespace + colon
+      let fixed = jsonString.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+      
+      // Attempt to fix single quotes used for keys: 'type': ... -> "type": ...
+      fixed = fixed.replace(/['](\w+)[']\s*:/g, '"$1":');
+      
       try {
-        serviceAccount = JSON.parse(fixedQuotes);
+        serviceAccount = JSON.parse(fixed);
       } catch (e2) {
-         console.error("JSON parse failed even after fixes.", e2);
-         throw e2;
+         console.error("JSON parse failed even after structure fixes.");
+         // FALLBACK: Aggressive whitespace stripping, but try to preserve private_key headers
+         // This is a "Hail Mary" attempt
+         const stripped = jsonString.replace(/\\n/g, ' ').replace(/[\r\n]+/g, ' ');
+         try {
+             const parsed = JSON.parse(stripped);
+             // If this worked, the private_key is likely broken (spaces instead of newlines)
+             // We need to fix it.
+             if (parsed.private_key && typeof parsed.private_key === 'string') {
+                 // Reformat PEM header/footer
+                 parsed.private_key = parsed.private_key
+                    .replace(/-----BEGIN PRIVATE KEY-----/, '-----BEGIN PRIVATE KEY-----\n')
+                    .replace(/-----END PRIVATE KEY-----/, '\n-----END PRIVATE KEY-----\n');
+                 // Ensure body has no spaces? Actually PEM parsers tolerate spaces usually.
+                 // But let's leave it.
+             }
+             serviceAccount = parsed;
+         } catch (e3) {
+             throw e2; // Throw the earlier error
+         }
       }
     }
 
-    // POST-PROCESSING: Fix the private_key specifically
+    // POST-PROCESSING: Fix the private_key newlines
     if (serviceAccount && serviceAccount.private_key) {
-      // Replace literal \n string sequences with actual newlines
+      // If the private_key contains literal "\n" characters (escaped), replace them with real newlines
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
   } catch (error) {
