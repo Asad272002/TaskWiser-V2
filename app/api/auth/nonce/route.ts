@@ -7,7 +7,20 @@ const NONCE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 export async function POST(request: Request) {
   try {
-    const { address } = await request.json();
+    // Robustly handle empty or invalid JSON bodies
+    let body;
+    try {
+      const text = await request.text();
+      if (!text) {
+         return NextResponse.json({ error: "Empty request body" }, { status: 400 });
+      }
+      body = JSON.parse(text);
+    } catch (parseError) {
+      console.error("Failed to parse request body:", parseError);
+      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
+    }
+
+    const { address } = body;
 
     if (!address || typeof address !== "string") {
       const response = NextResponse.json(

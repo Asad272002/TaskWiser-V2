@@ -5,14 +5,14 @@ import { join, isAbsolute } from "path";
 let serviceAccount: ServiceAccount | undefined;
 
 // Debug log to check if environment variables are loaded
-if (process.env.NODE_ENV !== 'production') {
-  console.log("Firebase Admin Init:");
-  console.log("FIREBASE_SERVICE_ACCOUNT_KEY present:", !!process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-  console.log("FIREBASE_SERVICE_ACCOUNT_PATH present:", !!process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
-}
+console.log("--- Firebase Admin Initialization Start ---");
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("FIREBASE_SERVICE_ACCOUNT_KEY length:", process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.length);
+console.log("FIREBASE_SERVICE_ACCOUNT_PATH:", process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
   try {
+    console.log("Parsing FIREBASE_SERVICE_ACCOUNT_KEY...");
     let jsonString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY.trim();
     
     // Remove surrounding quotes if they exist (e.g. "..." or '...')
@@ -62,50 +62,41 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     if (jsonString.startsWith('{{')) {
       jsonString = jsonString.substring(1, jsonString.length - 1);
     }
-    
+
     try {
       serviceAccount = JSON.parse(jsonString);
+      console.log("Successfully parsed service account JSON.");
     } catch (e1) {
       console.error("First parse attempt failed. Trying aggressive fixes.");
-      // If parsing failed, it might be due to unquoted keys or single quotes
-      
-      // Attempt to fix unquoted keys: type: "service_account" -> "type": "service_account"
-      // Matches: start-of-line/brace/comma + whitespace + word + whitespace + colon
-      let fixed = jsonString.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
-      
-      // Attempt to fix single quotes used for keys: 'type': ... -> "type": ...
-      fixed = fixed.replace(/['](\w+)[']\s*:/g, '"$1":');
-      
+
+      // Fallback: Use JS evaluation (new Function) to parse loose JSON
+      // This handles single quotes, unquoted keys, trailing commas, etc.
       try {
-        serviceAccount = JSON.parse(fixed);
-      } catch (e2) {
-         console.error("JSON parse failed even after structure fixes.");
-         // FALLBACK: Aggressive whitespace stripping, but try to preserve private_key headers
-         // This is a "Hail Mary" attempt
-         const stripped = jsonString.replace(/\\n/g, ' ').replace(/[\r\n]+/g, ' ');
-         try {
-             const parsed = JSON.parse(stripped);
-             // If this worked, the private_key is likely broken (spaces instead of newlines)
-             // We need to fix it.
-             if (parsed.private_key && typeof parsed.private_key === 'string') {
-                 // Reformat PEM header/footer
-                 parsed.private_key = parsed.private_key
-                    .replace(/-----BEGIN PRIVATE KEY-----/, '-----BEGIN PRIVATE KEY-----\n')
-                    .replace(/-----END PRIVATE KEY-----/, '\n-----END PRIVATE KEY-----\n');
-                 // Ensure body has no spaces? Actually PEM parsers tolerate spaces usually.
-                 // But let's leave it.
-             }
-             serviceAccount = parsed;
-         } catch (e3) {
-             throw e2; // Throw the earlier error
-         }
+        console.log("JSON.parse failed. Attempting JS evaluation fallback...");
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('return ' + jsonString);
+        serviceAccount = fn();
+        console.log("Successfully parsed service account using JS evaluation.");
+      } catch (eEval) {
+        console.error("JS evaluation failed:", eEval);
+        
+        // Log detailed diagnostics for the first 50 chars to debug encoding/hidden chars
+        console.error("Diagnostic dump of first 50 chars:");
+        for (let i = 0; i < Math.min(jsonString.length, 50); i++) {
+            console.error(`Char ${i}: '${jsonString[i]}' code=${jsonString.charCodeAt(i)}`);
+        }
+        
+        throw e1; // Throw the original JSON error if both fail
       }
     }
 
     // POST-PROCESSING: Fix the private_key newlines
-    if (serviceAccount && serviceAccount.private_key) {
+    // Cast to any to handle both snake_case (raw JSON) and camelCase (TS type)
+    const rawServiceAccount = serviceAccount as any;
+    if (rawServiceAccount && rawServiceAccount.private_key) {
       // If the private_key contains literal "\n" characters (escaped), replace them with real newlines
-      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      // Also handle case where it might be literal \\n (double escaped)
+      rawServiceAccount.private_key = rawServiceAccount.private_key.replace(/\\n/g, '\n');
     }
   } catch (error) {
     console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY. Content snippet:", process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.substring(0, 50));
@@ -113,14 +104,17 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     // Do NOT fallback to path if key was provided but failed
   }
 } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+  console.log("Trying FIREBASE_SERVICE_ACCOUNT_PATH...");
   try {
     const resolvedPath = isAbsolute(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
       ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH
       : join(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
       
+    console.log("Resolved path:", resolvedPath);
     if (existsSync(resolvedPath)) {
       const raw = readFileSync(resolvedPath, "utf-8");
       serviceAccount = JSON.parse(raw);
+      console.log("Successfully read service account from file.");
     } else {
       console.warn(`FIREBASE_SERVICE_ACCOUNT_PATH is set but file does not exist: ${resolvedPath}`);
     }
@@ -142,13 +136,19 @@ if (!serviceAccount && process.env.NODE_ENV !== 'production' && !process.env.GOO
   // Ideally, the user should provide a service account. 
 }
 
+console.log("Initializing Firebase Admin...");
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: serviceAccount
-      ? admin.credential.cert(serviceAccount)
-      : admin.credential.applicationDefault(),
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  });
+  if (serviceAccount) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+    console.log("Firebase Admin initialized with Service Account.");
+  } else {
+    admin.initializeApp(); // This tries ADC
+    console.log("Firebase Admin initialized with ADC (or failed).");
+  }
+} else {
+    console.log("Firebase Admin already initialized.");
 }
 
 const adminApp = admin.app();
