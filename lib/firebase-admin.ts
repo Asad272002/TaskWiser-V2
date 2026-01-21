@@ -1,8 +1,15 @@
 import admin, { type ServiceAccount } from "firebase-admin";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, isAbsolute } from "path";
 
 let serviceAccount: ServiceAccount | undefined;
+
+// Debug log to check if environment variables are loaded
+if (process.env.NODE_ENV !== 'production') {
+  console.log("Firebase Admin Init:");
+  console.log("FIREBASE_SERVICE_ACCOUNT_KEY present:", !!process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+  console.log("FIREBASE_SERVICE_ACCOUNT_PATH present:", !!process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
+}
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
   try {
@@ -46,20 +53,20 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     serviceAccount = JSON.parse(jsonString);
   } catch (error) {
     console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY", error);
-    if (error instanceof Error) {
-      console.error("Error message:", error.message);
-    }
-    const preview = process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.substring(0, 200);
-    console.error("Preview (first 200 chars):", preview);
-    console.error("Contains actual newlines:", preview?.includes('\n'));
+    // Do NOT fallback to path if key was provided but failed
   }
 } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
   try {
     const resolvedPath = isAbsolute(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
       ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH
       : join(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
-    const raw = readFileSync(resolvedPath, "utf-8");
-    serviceAccount = JSON.parse(raw);
+      
+    if (existsSync(resolvedPath)) {
+      const raw = readFileSync(resolvedPath, "utf-8");
+      serviceAccount = JSON.parse(raw);
+    } else {
+      console.warn(`FIREBASE_SERVICE_ACCOUNT_PATH is set but file does not exist: ${resolvedPath}`);
+    }
   } catch (error) {
     console.error(
       "Failed to read FIREBASE_SERVICE_ACCOUNT_PATH",
