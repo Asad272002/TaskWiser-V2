@@ -22,11 +22,22 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     }
 
     // Fix common copy-paste error: missing surrounding braces
-    if (!jsonString.startsWith('{')) {
-      jsonString = `{${jsonString}}`;
-    }
+              if (!jsonString.startsWith('{')) {
+                // Check if it starts with "type": "service_account" or similar
+                // If the user pasted the CONTENT of the json without braces
+                jsonString = `{${jsonString}}`;
+              }
 
-    // Attempt to fix single quotes used for keys (e.g. {'type': ...})
+              // CRITICAL FIX for "Expected property name or '}' in JSON at position 1"
+              // This error happens when the string starts with `{` but immediately has an invalid char (like a newline or space)
+              // OR if we added braces to a string that already had them but was just malformed
+              
+              // If we see double braces like {{ "type"... }} because the user fixed it while we also fixed it
+              if (jsonString.startsWith('{{')) {
+                jsonString = jsonString.substring(1, jsonString.length - 1);
+              }
+
+              // Attempt to fix single quotes used for keys (e.g. {'type': ...})
     // This replaces 'key': with "key":
     jsonString = jsonString.replace(/['](\w+)[']\s*:/g, '"$1":');
     
