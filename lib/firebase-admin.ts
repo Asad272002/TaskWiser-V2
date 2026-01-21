@@ -12,50 +12,29 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
-  try {
-    let jsonString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY.trim();
-    
-    // Remove surrounding quotes if they exist
-    if ((jsonString.startsWith('"') && jsonString.endsWith('"')) || 
-        (jsonString.startsWith("'") && jsonString.endsWith("'"))) {
-      jsonString = jsonString.slice(1, -1);
-    }
-    
-    // First, escape any literal control characters (actual newlines, tabs, etc.)
-    // These are invalid in JSON and must be escaped
-    // We need to do this carefully to avoid double-escaping
-    let result = '';
-    for (let i = 0; i < jsonString.length; i++) {
-      const char = jsonString[i];
-      const prevChar = i > 0 ? jsonString[i - 1] : '';
-      
-      // If it's a control character and not already escaped
-      if (char === '\n' && prevChar !== '\\') {
-        result += '\\n';
-      } else if (char === '\r' && prevChar !== '\\') {
-        result += '\\r';
-      } else if (char === '\t' && prevChar !== '\\') {
-        result += '\\t';
-      } else if (char.charCodeAt(0) >= 0x00 && char.charCodeAt(0) <= 0x1F && prevChar !== '\\') {
-        // Escape any other control characters
-        result += '\\u' + ('0000' + char.charCodeAt(0).toString(16)).slice(-4);
-      } else {
-        result += char;
-      }
-    }
-    jsonString = result;
-    
-    // Now handle double-escaped sequences from env files (\\n -> \n, \\" -> \")
-    // This converts "\\n" (backslash + backslash + n) to "\n" (backslash + n) for JSON
-    jsonString = jsonString.replace(/\\\\n/g, '\\n');
-    jsonString = jsonString.replace(/\\\\"/g, '\\"');
-    
-    serviceAccount = JSON.parse(jsonString);
-  } catch (error) {
-    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY", error);
-    // Do NOT fallback to path if key was provided but failed
-  }
-} else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+          try {
+            serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+          } catch (error) {
+            try {
+              // Retry with some common cleanup for env vars
+              let jsonString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY.trim();
+              
+              // Remove surrounding quotes if they exist
+              if ((jsonString.startsWith('"') && jsonString.endsWith('"')) || 
+                  (jsonString.startsWith("'") && jsonString.endsWith("'"))) {
+                jsonString = jsonString.slice(1, -1);
+              }
+              
+              // Handle escaped newlines that might have been double-escaped
+              // This fixes the case where \n becomes \\n in the private key
+              jsonString = jsonString.replace(/\\\\n/g, '\\n');
+              
+              serviceAccount = JSON.parse(jsonString);
+            } catch (retryError) {
+              console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY", retryError);
+            }
+          }
+        } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
   try {
     const resolvedPath = isAbsolute(process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
       ? process.env.FIREBASE_SERVICE_ACCOUNT_PATH
