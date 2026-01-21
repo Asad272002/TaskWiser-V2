@@ -10,7 +10,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Call the Python ML backend
-    const mlResponse = await fetch("http://127.0.0.1:8000/update", {
+    const mlApiUrl = process.env.ML_API_URL || "http://127.0.0.1:8000";
+    const mlResponse = await fetch(`${mlApiUrl}/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
