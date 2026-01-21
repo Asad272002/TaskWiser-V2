@@ -22,27 +22,37 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     }
 
     // SMART CLEANUP for Vercel Env Vars
-    // Vercel often injects literal "\n" characters for newlines in the UI.
-    // These break JSON.parse if they are outside strings (structural) 
-    // or if they are literal backslash+n inside strings (which JSON.parse reads as \\n).
     
-    // 1. Remove literal "\n" that appear before a property name (structural)
-    //    e.g. { \n "type": ... }  -> { "type": ... }
-    //    e.g. , \n "project_id": ... -> , "project_id": ...
-    jsonString = jsonString.replace(/\\n(?=\s*")/g, '');
-    
-    // 2. Remove literal "\n" that appear before a closing brace (structural)
-    //    e.g. ... } \n } -> ... } }
-    jsonString = jsonString.replace(/\\n(?=\s*\})/g, '');
-    
-    // 3. Remove literal "\n" that appear after an opening brace (structural)
-    //    e.g. { \n "type" ... -> { "type" ...
-    jsonString = jsonString.replace(/\{\s*\\n/g, '{');
+    // 1. Remove literal newlines (0x0A, 0x0D) everywhere
+    //    JSON.parse cannot handle literal newlines.
+    //    We replace them with spaces, which are valid whitespace in JSON.
+    //    Note: This assumes the user didn't put literal newlines INSIDE a string value (which is invalid JSON anyway).
+    //    Valid JSON uses \n (escaped) for newlines in strings.
+    jsonString = jsonString.replace(/[\r\n]+/g, ' ');
 
-    // 4. Handle actual newlines (0x0A) if they somehow got in (rare in Vercel envs but possible)
-    //    We treat them as whitespace and let JSON.parse handle them, UNLESS they are inside strings.
-    //    But since we can't easily distinguish, we'll assume JSON.parse handles structural newlines.
+    // 2. Remove escaped newlines (\n) that appear in structural positions
+    //    Vercel sometimes escapes the newlines you paste, turning 
+    //    {
+    //      "type": ...
+    //    }
+    //    into "{\\n  \"type\": ..."
+    //    These \\n are "escaped newlines" but they are in places where we expect whitespace.
+    //    JSON.parse will see them as characters inside the string (if the whole thing is quoted) 
+    //    or as invalid syntax if not quoted properly.
+    //    
+    //    We want to remove \\n if it's NOT inside a value.
+    //    This is hard to do with regex perfectly, but let's try targeting common patterns.
     
+    // Remove \\n before quotes (property names)
+    jsonString = jsonString.replace(/\\n(?=\s*")/g, ' ');
+    // Remove \\n after braces
+    jsonString = jsonString.replace(/(\{|\})\s*\\n/g, '$1 ');
+    
+    // 3. Handle double-escaped newlines inside the private key
+    //    If the user has "private_key": "-----BEGIN...\\n...", we want to keep \\n
+    //    But if it became \\\\n, we might need to fix it.
+    //    Let's rely on the post-processing step for private_key.
+
     // Fix common copy-paste error: missing surrounding braces
     if (!jsonString.trim().startsWith('{')) {
       jsonString = `{${jsonString}}`;
